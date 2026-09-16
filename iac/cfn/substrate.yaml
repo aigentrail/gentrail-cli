@@ -177,7 +177,7 @@ Parameters:
     Description: Resolved at deploy time from the public AL2023 SSM alias. Do not override.
   PublicRepoUrl:
     Type: String
-    Default: https://github.com/aigentrail/gentrail-byoc-edition.git
+    Default: https://github.com/aigentrail/gentrail-cli.git
     Description: Public repo the bootstrap node clones to get the Helm chart.
   RepoBranch:
     Type: String

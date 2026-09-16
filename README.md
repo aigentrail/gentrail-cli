@@ -1,135 +1,101 @@
-# Gentrail BYOC
+# Gentrail CLI
 
-> [!WARNING]
-> Work in progress. Interfaces and image tags may change without notice while
-> we continuously harden the system. Expect rough edges.
+Run Gentrail locally or in your own AWS account. Check agent tool calls against
+policies and see their activity in a dashboard. Your data stays on your machine
+or in your AWS account.
 
-Run the full Gentrail stack in your own AWS account; your trace data never leaves
-it. There is no login, so the network is your access boundary. One binary installs,
-connects, reports on, and removes it; there is nothing to clone.
+## Install
 
-## 1. Get a license
-
-Get a free evaluation license (10 agents, 60 days) at https://gentrail.ai/#license.
-You paste it into the dashboard after install; there is nothing to set up first.
-
-## 2. Install the CLI
+On macOS or Linux:
 
 ```bash
 curl -LsSf https://gentrail.ai/install.sh | sh
+gentrail
 ```
 
-This downloads the `gentrail` binary for your platform from this repo's latest
-release, verifies its SHA256, and puts it in `~/.local/bin`. On Windows, download
-`gentrail-windows-amd64.exe` (or `-arm64`) from the latest release, rename it to
-`gentrail.exe`, and put it on your `PATH`; every command below works the same from
-PowerShell.
+Follow the installer's PATH instructions if needed. On Windows, download the
+binary for your machine from [Releases](https://github.com/aigentrail/gentrail-cli/releases),
+rename it to `gentrail.exe`, and add it to your PATH.
 
-The CLI uses your AWS credentials the way the `aws` CLI does (`aws sts
-get-caller-identity` must work). `gentrail connect` also needs `aws` and `kubectl`
-on your PATH, plus the AWS Session Manager plugin for the evaluation tier.
+The CLI menu handles setup, licenses, agent connections, and AWS deployments.
+You don't need to clone this repo.
 
-## 3. Pick a tier
+## Run locally
 
-- **Evaluation** (start here): one EC2 node running k3s with every store
-  in-cluster. About 5 to 8 minutes, roughly $70/mo while it runs. Single-AZ,
-  node-local storage, no managed backups: a trial box, not a system of record.
-- **Production**: EKS + RDS, KMS CMK encryption, and S3 Object-Lock evidence.
-  About 30 minutes, roughly $400/mo. Highly available and the compliance system
-  of record.
+Choose **Manage license** to request a free license or save an existing key.
+Then choose **Start Gentrail** and open [localhost:7331](http://localhost:7331).
 
-Both keep all data in your account. Start on Evaluation; move to Production when
-you need HA and the compliance posture.
+Keep the terminal open while using Gentrail. Ctrl-C stops it; your data stays in
+`~/.gentrail`. To start it directly next time, run `gentrail serve`.
 
-## 4. Install
+## Connect an agent
+
+In another terminal, run `gentrail` and choose **Connect an agent**. Select
+Claude Code or Codex, then choose this project or all your projects.
+
+For local use, setup finds your API key automatically. For AWS, enter the
+dashboard and trace ingest URLs printed by **Open dashboard**, plus an API key
+from **Integrations** in the dashboard.
+
+After setup, restart Claude Code and check `/hooks`. In Codex, open `/hooks`
+and trust the Gentrail hook. The agent appears in Gentrail after registration;
+new tool calls report their policy checks and arguments.
+
+Blocked calls are denied. Calls that need approval prompt in Claude Code and
+are denied in Codex. Setup also lets you choose what happens when Gentrail
+cannot be reached. Run setup again to update or remove the hook.
+
+Hooks report checks before execution, not tool results or model usage. For
+those, use the [SDK](https://github.com/aigentrail/sdk) with an API key from
+**Integrations** and your Gentrail OTLP endpoint. Locally, that endpoint is
+`http://127.0.0.1:4318`. API keys and license keys are separate.
+
+## Deploy to AWS
+
+Configure AWS credentials for the target account, then choose **Deploy Gentrail**.
+Setup asks for a region, stack name, and deployment type, then shows the plan
+and cost estimate before creating resources.
+
+| Deployment | Runs on | Storage |
+| --- | --- | --- |
+| Evaluation | One EC2 node with k3s | On the node; replacing or deleting it loses the data |
+| Production | EKS | RDS, DynamoDB, and S3, with KMS encryption and S3 Object Lock for evidence |
+
+Your AWS principal needs the [deployment permissions](iac/cfn/deploy-policy.json).
+AWS charges for the resources in your account.
+
+Choose **Open dashboard** to connect. This needs `aws` and `kubectl`;
+Evaluation also needs the AWS Session Manager plugin. For Production, your
+principal needs EKS access. The principal that installed it already has access.
+
+Leave the connection running and open [localhost:8001](http://localhost:8001).
+Both AWS deployments have **no dashboard login**. Use the CLI tunnel or keep
+access limited to your network. Production endpoints are private by default.
+
+### Scripts
+
+Setup saves deployment settings in `gentrail.toml`, without the license key:
 
 ```bash
-gentrail install --tier evaluation     # or --tier production
+gentrail install --plan gentrail.toml --yes
 ```
 
-Evaluation deploys one CloudFormation stack; the node installs k3s and the chart
-itself. Production stages the trace archiver, stands up the EKS and RDS substrate,
-and a short-lived bootstrap node inside the VPC installs the load balancer
-controller and the chart, then stops itself. Either way your machine only runs
-the CLI, and each step is shown as it happens.
+Use `GENTRAIL_LICENSE_JWT` for a license key or JWT file path. Keep keys out of
+version control. See `gentrail <command> --help` for flags; use the same stack
+name and region when returning to a deployment.
 
-Production puts the dashboard and the OTLP ingest endpoint behind two load
-balancers the stack itself owns, private inside the VPC by default; `gentrail
-status` prints their URLs. Pass `--dashboard-exposure internet-facing` or
-`--otel-exposure internet-facing` together with `--cert-arn` (an ACM certificate)
-to publish either one with TLS, and `--allowed-cidr` to narrow who can reach them.
+### Remove a deployment
 
-Production needs broad admin-level AWS rights: the stack provisions a VPC, EKS,
-RDS, DynamoDB, Lambda, S3, KMS, Secrets Manager, CloudWatch Logs, and named IAM
-roles. Attach the scoped `iac/cfn/deploy-policy.json` from this repo to your
-deploy principal, or use `arn:aws:iam::aws:policy/AdministratorAccess` for the
-simplest path. Evaluation needs only the EC2, IAM, and SSM subset.
+Choose **Remove deployment**, or run `gentrail teardown`.
 
-Flags: `--stack` (default `gentrail`), `--region`, `--profile`. Re-running Production
-is a no-op unless the stack inputs change. Re-running Evaluation is a no-op unless
-you change a node property; upgrading the appliance means replacing the node,
-which wipes its node-local data.
+Evaluation deletes the node and its data. Production deletes EKS, RDS, and
+stack-owned load balancers, taking a final RDS snapshot. DynamoDB tables, S3
+buckets, and the KMS key remain and can still incur charges. Delete retained
+resources separately when no longer needed; retained table names can prevent
+reusing the same stack name.
 
-## 5. Open the dashboard
+## What's in this repo
 
-```bash
-gentrail connect                       # leave it running; Ctrl-C to disconnect
-```
-
-This detects your tier and forwards the dashboard and the OTLP ingest endpoint to
-localhost with nothing publicly exposed (Evaluation over an SSM tunnel to the box,
-Production through the EKS API). Open http://localhost:8001. There is no login;
-every page redirects to the license input until you paste your license, then every
-service activates within about two minutes.
-
-On Production the principal running `connect` needs access to the EKS cluster. The
-principal that ran `install` has it automatically; grant others an EKS access entry
-on the cluster.
-
-`gentrail status` reports the install's health at any time.
-
-## 6. Send a trace
-
-Generate an API key in the dashboard (Integrations, then API keys), install the
-SDK, and run an agent pointed at the OTLP endpoint `gentrail connect` printed. See
-the SDK quickstart at https://github.com/aigentrail/sdk.
-
-## License
-
-The license is an Ed25519-signed JWT. Paste it or a renewal on the dashboard's
-License page; it verifies locally and hot-reloads every service with no restarts.
-You get a renewal banner within 30 days of expiry. At expiry the install goes
-read-only: reads keep working, writes are refused, and nothing is deleted, until
-you install a new license.
-
-Free tier covers full observability and the dashboard for 60 days with up to 10
-agents. Past 10 agents, new agents' traces are dropped at ingest (the request
-still succeeds) and a banner reports the suppressed count.
-
-## Uninstall
-
-```bash
-gentrail teardown                      # add --stack <name> if you changed it at install
-```
-
-Confirms once, then detects the tier. Evaluation deletes the single stack (its EC2
-and VPC). Production clears the database's deletion protection and deletes the
-substrate: EKS, RDS, the VPC, and the stack's own load balancers. Nothing the
-install creates lives outside its stack, so a console delete works the same way.
-Your data stores are kept on purpose: the DynamoDB tables, the evidence,
-trace-archive, and log buckets, the KMS key, and the gentrail-cfn-<account>-<region>
-bucket the CLI stages templates in survive a teardown so it can never destroy
-customer data. Delete them yourself when you are sure; until then a reinstall
-under the same stack name collides with the retained table names.
-
-## What ships in this repo
-
-The Helm chart the install runs, the CloudFormation templates it deploys, the
-scoped IAM policy, and the CLI binaries on the releases page. The service source
-does not ship; the chart pulls public images.
-
-## Hardening
-
-The install is single-tenant with no login, so the network is your boundary.
-Restrict dashboard and ingest access to your VPN or corporate CIDR, confirm
-CloudTrail is on, and forward logs to your SIEM.
+The [Helm chart](charts/gentrail), [CloudFormation templates](iac/cfn), and
+[initialization files](iac/init). CLI binaries ship with releases; the chart
+pulls public container images. Application source is not included.

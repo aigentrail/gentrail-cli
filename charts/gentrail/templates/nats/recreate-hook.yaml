@@ -1,0 +1,97 @@
+{{- /*
+Kubernetes forbids changing a StatefulSet's volumeClaimTemplates in place, and
+this chart moved NATS from a PVC to an emptyDir. On upgrade from a release that
+still has the claim template, delete the old StatefulSet (and its data-nats-*
+claims, whose contents the DynamoDB reconcile sweep replays) so the upgrade can
+create the new one. A no-op once the live object has no claim templates.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nats-recreate
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nats-recreate
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nats-recreate
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nats-recreate
+subjects:
+  - kind: ServiceAccount
+    name: nats-recreate
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nats-recreate
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-15"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 60
+  backoffLimit: 2
+  template:
+    spec:
+      serviceAccountName: nats-recreate
+      restartPolicy: Never
+      containers:
+        - name: recreate
+          image: docker.io/amazon/aws-cli:2.17.0
+          env:
+            - name: NS
+              value: {{ .Release.Namespace | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              API=https://kubernetes.default
+              auth() { curl -sS --cacert "$CA" -H "Authorization: Bearer $TOKEN" "$@"; }
+              CODE=$(auth -o /tmp/sts.json -w '%{http_code}' "$API/apis/apps/v1/namespaces/$NS/statefulsets/nats")
+              if [ "$CODE" = 404 ]; then echo "no nats StatefulSet; nothing to recreate"; exit 0; fi
+              [ "$CODE" = 200 ] || { echo "get statefulset: HTTP $CODE"; cat /tmp/sts.json; exit 1; }
+              if ! grep -q '"volumeClaimTemplates"' /tmp/sts.json; then echo "nats StatefulSet already claim-free"; exit 0; fi
+              echo "nats StatefulSet still has volumeClaimTemplates; deleting it so the upgrade can recreate it"
+              auth -X DELETE -H "Content-Type: application/json" \
+                --data '{"propagationPolicy":"Foreground"}' "$API/apis/apps/v1/namespaces/$NS/statefulsets/nats" -o /dev/null
+              for i in $(seq 1 60); do
+                [ "$(auth -o /dev/null -w '%{http_code}' "$API/apis/apps/v1/namespaces/$NS/statefulsets/nats")" = 404 ] && break
+                sleep 2
+              done
+              auth "$API/api/v1/namespaces/$NS/persistentvolumeclaims" \
+                | grep -o '"name":"data-nats-[0-9]*"' | sed 's/"name":"//;s/"//' | while read -r pvc; do
+                  echo "deleting claim $pvc"; auth -X DELETE "$API/api/v1/namespaces/$NS/persistentvolumeclaims/$pvc" -o /dev/null
+                done
+              echo "nats StatefulSet recreated on upgrade"

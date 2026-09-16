@@ -29,7 +29,7 @@ Parameters:
 
   PublicRepoUrl:
     Type: String
-    Default: https://github.com/aigentrail/gentrail-byoc-edition.git
+    Default: https://github.com/aigentrail/gentrail-cli.git
     Description: The public BYOC repo the node clones to self-install the chart + init specs.
 
   RepoBranch:
