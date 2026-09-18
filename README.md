@@ -13,9 +13,20 @@ curl -LsSf https://gentrail.ai/install.sh | sh
 gentrail
 ```
 
-Follow the installer's PATH instructions if needed. On Windows, download the
-binary for your machine from [Releases](https://github.com/aigentrail/gentrail-cli/releases),
-rename it to `gentrail.exe`, and add it to your PATH.
+On Windows, paste this into PowerShell:
+
+```powershell
+irm https://gentrail.ai/install.ps1 | iex
+gentrail
+```
+
+The Windows installer chooses x64 or ARM64, verifies the download, and installs
+into `%LOCALAPPDATA%\Gentrail\bin`. It adds that directory to your user PATH;
+no administrator access is needed. Both installers show download progress.
+Run the same command to update.
+
+For manual installation, binaries and checksums are on
+[Releases](https://github.com/aigentrail/gentrail-cli/releases).
 
 The CLI menu handles setup, licenses, agent connections, and AWS deployments.
 You don't need to clone this repo.
@@ -23,10 +34,14 @@ You don't need to clone this repo.
 ## Run locally
 
 Choose **Manage license** to request a free license or save an existing key.
-Then choose **Start Gentrail** and open [localhost:7331](http://localhost:7331).
+Then choose **Start Gentrail**. The dashboard opens in your browser once ready;
+its address is also printed in the terminal.
 
 Keep the terminal open while using Gentrail. Ctrl-C stops it; your data stays in
 `~/.gentrail`. To start it directly next time, run `gentrail serve`.
+
+Set `GENTRAIL_NO_BROWSER=1` to skip opening the browser. Scripted runs do not
+open it. Set `GENTRAIL_NO_PROGRESS=1` to hide installer download progress.
 
 ## Connect an agent
 
@@ -64,11 +79,13 @@ and cost estimate before creating resources.
 Your AWS principal needs the [deployment permissions](iac/cfn/deploy-policy.json).
 AWS charges for the resources in your account.
 
-Choose **Open dashboard** to connect. This needs `aws` and `kubectl`;
+Setup opens a dashboard connection when installation finishes. Choose
+**Open dashboard** to reconnect later. This needs `aws` and `kubectl`;
 Evaluation also needs the AWS Session Manager plugin. For Production, your
 principal needs EKS access. The principal that installed it already has access.
 
-Leave the connection running and open [localhost:8001](http://localhost:8001).
+Leave the connection running. Your browser opens when the dashboard is ready,
+and the terminal prints a clickable link.
 Both AWS deployments have **no dashboard login**. Use the CLI tunnel or keep
 access limited to your network. Production endpoints are private by default.
 
