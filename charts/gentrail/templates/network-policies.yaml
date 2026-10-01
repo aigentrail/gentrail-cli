@@ -81,7 +81,8 @@ spec:
     - ports:
         - { protocol: TCP, port: 8080 }
 ---
-# evaluator + authproxy reach NATS (4222), AWS DDB (443), and DNS.
+# evaluator + authproxy reach NATS (4222), AWS DDB (443), and DNS; the exporter
+# reaches DDB and S3 on 443.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -90,7 +91,7 @@ metadata:
 spec:
   podSelector:
     matchExpressions:
-      - { key: app.kubernetes.io/component, operator: In, values: [ evaluator, authproxy ] }
+      - { key: app.kubernetes.io/component, operator: In, values: [ evaluator, authproxy, exporter ] }
   policyTypes: [ Egress ]
   egress:
     - to: []

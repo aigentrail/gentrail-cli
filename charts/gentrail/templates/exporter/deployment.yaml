@@ -1,0 +1,58 @@
+{{- if .Values.exporter.target }}
+{{- /*
+The export sink sweep (docs/architecture/export-sinks.md). One replica: the
+cursor only moves forward and every window's objects are deterministic, so a
+second replica would only repeat writes.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exporter
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "gentrail.labels" (merge (dict "component" "exporter") .) | indent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+{{ include "gentrail.selectorLabels" (merge (dict "component" "exporter") .) | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "gentrail.selectorLabels" (merge (dict "component" "exporter") .) | indent 8 }}
+    spec:
+      serviceAccountName: exporter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+{{ include "gentrail.imagePullSecrets" . | indent 6 }}
+      containers:
+        - name: exporter
+          image: {{ include "gentrail.image" (merge (dict "component" "exporter") .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.aws.region | quote }}
+            - name: EXPORT_TARGET
+              value: {{ .Values.exporter.target | quote }}
+            - name: DYNAMO_TRACES_TABLE
+              value: "{{ .Values.ddb.tablePrefix }}-traces{{ .Values.ddb.tableSuffix }}"
+            - name: DYNAMO_AGENT_STATS_TABLE
+              value: "{{ .Values.ddb.tablePrefix }}-agent-stats{{ .Values.ddb.tableSuffix }}"
+{{- include "gentrail.localEnv" . | nindent 12 }}
+            {{- if and .Values.irsa.exporter (eq .Values.mode "k3s") }}
+{{- include "gentrail.irsaEnv" .Values.irsa.exporter | nindent 12 }}
+            {{- end }}
+          resources: {{- toYaml .Values.exporter.resources | nindent 12 }}
+          {{- if and .Values.irsa.exporter (eq .Values.mode "k3s") }}
+          volumeMounts:
+{{- include "gentrail.irsaTokenMount" . | nindent 12 }}
+          {{- end }}
+      {{- if and .Values.irsa.exporter (eq .Values.mode "k3s") }}
+      volumes:
+{{- include "gentrail.irsaTokenVolume" . | nindent 8 }}
+      {{- end }}
+{{- end }}

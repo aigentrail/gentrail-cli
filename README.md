@@ -41,6 +41,8 @@ the dashboard from the local workspace. Quitting the CLI stops the instance it
 started; your data stays in `~/.gentrail`. If Gentrail is already running in
 another terminal, the workspace connects to it and leaves it running on exit.
 To run the service directly, use `gentrail serve`.
+Add `--export-to <dir or s3://bucket/prefix>` to also write traces and tool
+calls as Parquet for DuckDB or a shared bucket.
 
 The CLI remembers your last workspace. Local opens its status screen on the
 next launch. AWS remembers the stack, region, profile, and connection addresses;
@@ -103,6 +105,19 @@ logs, and a reconnect action that does not repeat deployment. Quitting disconnec
 your machine; AWS resources keep running.
 Both AWS deployments have **no dashboard login**. Use the CLI tunnel or keep
 access limited to your network. Production endpoints are private by default.
+
+### Export traces
+
+Production can copy traces and tool calls into an S3 bucket you own, as
+Parquet partitioned by org, date, and hour, for Athena, BigQuery, Snowflake, or
+DuckDB. Answer **Export bucket** in the setup questions, or set
+`data.export_bucket` in `gentrail.toml`. Each 5-minute window arrives about 15
+minutes after it closes, and the first run backfills the last 24 hours.
+
+The bucket can live in another account. Its bucket policy must allow
+`s3:PutObject` under the export prefix for the stack's exporter role (the
+`ExporterIrsaRole` resource), and a bucket encrypted with your own KMS key must
+let that role call `kms:GenerateDataKey`.
 
 ### Scripts
 

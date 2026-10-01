@@ -39,6 +39,10 @@ Metadata:
         Parameters:
           - ArchiverCodeS3Bucket
           - ArchiverCodeS3Key
+      - Label: { default: "Trace export" }
+        Parameters:
+          - ExportBucketName
+          - ExportPrefix
       - Label: { default: "RDS" }
         Parameters:
           - RdsInstanceClass
@@ -272,6 +276,21 @@ Parameters:
     Default: internal
     AllowedValues: [ internal, internet-facing ]
     Description: Where the OTLP ingest load balancer listens; internet-facing lets agents outside the VPC send telemetry without a tunnel.
+  ExportBucketName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+    Description: >
+      An S3 bucket you own to receive traces and tool calls as Parquet
+      (docs/architecture/export-sinks.md). Empty turns export off. The bucket
+      may live in another account; its policy must let this stack's exporter
+      role write under ExportPrefix, and an SSE-KMS bucket must grant it
+      kms:GenerateDataKey.
+  ExportPrefix:
+    Type: String
+    Default: gentrail
+    AllowedPattern: "^[A-Za-z0-9!_.*()-]+(/[A-Za-z0-9!_.*()-]+)*$"
+    Description: Key prefix the export writes under, without leading or trailing slashes.
   BedrockModelId:
     Type: String
     Default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -337,6 +356,7 @@ Conditions:
   EnableVpcFlowLogsCond: !Equals [ !Ref EnableVpcFlowLogs, "true" ]
   EnableRdsPerformanceInsightsCond: !Equals [ !Ref EnableRdsPerformanceInsights, "true" ]
   EnableAlbAccessLogsCond: !Equals [ !Ref EnableAlbAccessLogs, "true" ]
+  ExportEnabled: !Not [ !Equals [ !Ref ExportBucketName, "" ] ]
   DashboardPublic: !Equals [ !Ref DashboardExposure, internet-facing ]
   OtelPublic: !Equals [ !Ref OtelExposure, internet-facing ]
   HasCert: !Not [ !Equals [ !Ref ExistingAcmCertArn, "" ] ]
@@ -2018,6 +2038,59 @@ Resources:
       Tags:
         - { Key: gentrail:service-account, Value: evaluator }
 
+  # Exporter IRSA role: always created so the bootstrap can name it
+  # unconditionally; without an export bucket it can only read the two tables
+  # and no pod runs as its service account.
+  ExporterIrsaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": { "Federated": "${OidcArn}" },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "${OidcUrl}:sub": "system:serviceaccount:gentrail:exporter",
+                  "${OidcUrl}:aud": "sts.amazonaws.com"
+                }
+              }
+            }]
+          }
+        - OidcArn: !GetAtt EksOidcProvider.Arn
+          OidcUrl: !Select [1, !Split ["//", !GetAtt EksCluster.OpenIdConnectIssuerUrl]]
+      Policies:
+        - PolicyName: exporter-data-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DdbReadAndCursor
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt TracesTable.Arn
+                  - !GetAtt AgentStatsTable.Arn
+              - Sid: KmsDecrypt
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !If [ CreateKmsKey, !GetAtt SubstrateKmsKey.Arn, !Ref ExistingKmsKeyArn ]
+              - !If
+                - ExportEnabled
+                - Sid: ExportWrite
+                  Effect: Allow
+                  Action: s3:PutObject
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${ExportBucketName}/${ExportPrefix}/*"
+                - !Ref AWS::NoValue
+      Tags:
+        - { Key: gentrail:service-account, Value: exporter }
+
   # ── Authproxy IRSA role (k8s ingest, replaces the authproxy Lambda) ──
   AuthproxyIrsaRole:
     Type: AWS::IAM::Role
@@ -2334,6 +2407,7 @@ Resources:
           IMAGE_TAG="${ImageTag}"
           PUBLIC_HOST="${Hostname}"
           OTEL_HOST="${OtelHostname}"
+          EXPORT_BUCKET="${ExportBucketName}"
           GHCR_USER="${GhcrUser}"
           GHCR_TOKEN="${GhcrToken}"
 
@@ -2395,6 +2469,7 @@ Resources:
             dashboard: ${DashboardIrsaRole.Arn}
             policyEngine: ${PolicyEngineIrsaRole.Arn}
             evaluator: ${EvaluatorIrsaRole.Arn}
+            exporter: ${ExporterIrsaRole.Arn}
             authproxy: ${AuthproxyIrsaRole.Arn}
             rdsBootstrap: ${RdsBootstrapIrsaRole.Arn}
           license:
@@ -2407,6 +2482,7 @@ Resources:
           if [ -n "$IMAGE_TAG" ]; then HELM_EXTRA="$HELM_EXTRA --set image.tag=$IMAGE_TAG"; fi
           if [ -n "$OTEL_HOST" ]; then HELM_EXTRA="$HELM_EXTRA --set ingress.otelInternal=false"; fi
           if [ -n "$PUBLIC_HOST" ]; then HELM_EXTRA="$HELM_EXTRA --set ingress.dashboardInternal=false"; fi
+          if [ -n "$EXPORT_BUCKET" ]; then HELM_EXTRA="$HELM_EXTRA --set exporter.target=s3://$EXPORT_BUCKET/${ExportPrefix}"; fi
           if [ -n "$GHCR_TOKEN" ]; then
             set +x
             kubectl -n gentrail create secret docker-registry ghcr --docker-server=ghcr.io --docker-username="$GHCR_USER" --docker-password="$GHCR_TOKEN" --dry-run=client -o yaml | kubectl apply -f -

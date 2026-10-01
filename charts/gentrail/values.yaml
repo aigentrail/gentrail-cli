@@ -23,7 +23,7 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. images.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.9.0
+  tag: v0.10.0
   pullPolicy: IfNotPresent
   pullSecret: ""
 
@@ -88,6 +88,7 @@ irsa:
   policyEngine: ""
   rdsBootstrap: ""
   evaluator: ""
+  exporter: ""
   authproxy: ""
   docsServer: ""
   agentChat: ""
@@ -163,6 +164,14 @@ evaluator:
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits:   { cpu: 500m, memory: 350Mi }
+
+# The export sink (docs/architecture/export-sinks.md): an s3:// or file:// target
+# turns it on; empty (the default) renders nothing.
+exporter:
+  target: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
 
 authproxy:
   replicaCount: 1
