@@ -3,6 +3,7 @@
   "type": "object",
   "required": ["mode", "aws", "image", "ingress", "ddb", "s3", "rds", "llm", "irsa", "license"],
   "properties": {
+    "dashboard": { "type": "object", "properties": { "piiKmsKeyArn": { "type": "string", "pattern": "^$|^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$" }, "piiKmsRegion": { "type": "string" }, "useInstanceProfile": { "type": "boolean" } } },
     "mode":    { "type": "string", "enum": ["k3s", "eks"] },
     "aws":     { "type": "object", "required": ["region"], "properties": { "region": { "type": "string" } } },
     "image":   { "type": "object", "required": ["registry", "tag"], "properties": { "registry": { "type": "string" }, "tag": { "type": "string" }, "pullPolicy": { "type": "string" }, "pullSecret": { "type": "string" } } },

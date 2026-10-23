@@ -3,11 +3,19 @@ Description: >-
   Gentrail BYOC evaluation appliance: a single EC2 node running k3s that
   self-installs the Gentrail chart (values-appliance.yaml) on first boot. The
   whole stack runs in-cluster (Postgres + NATS + dynamodb-local), so no RDS, no
-  real DynamoDB, no S3, no IRSA. Access is SSM-only: the security group has zero
+  real DynamoDB, no S3, no IRSA. Tokenization uses an AWS KMS key through the
+  node role. Access is SSM-only: the security group has zero
   inbound rules and there is no SSH key. Single-AZ, node-local storage, no
   managed backups: an evaluation box, NOT a system of record.
 
 Parameters:
+  # >>> GENERATED pii-kms-parameters
+  ExistingPiiTokenizationKeyArn:
+    Type: String
+    Default: ""
+    AllowedPattern: ^$|^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$
+    Description: Optional existing PII tokenization key. Leave empty to create a retained rotating key. Its key policy must allow the dashboard role.
+  # <<< GENERATED pii-kms-parameters
   InstanceType:
     Type: String
     Default: t3.large
@@ -65,9 +73,60 @@ Parameters:
     Default: 10.20.0.0/24
 
 Conditions:
+  # >>> GENERATED pii-kms-conditions
+  CreatePiiTokenizationKey:
+    Fn::Equals:
+      - Ref: ExistingPiiTokenizationKeyArn
+      - ""
+  # <<< GENERATED pii-kms-conditions
   HasLicense: !Not [!Equals [!Ref LicenseJwt, ""]]
 
 Resources:
+  # >>> GENERATED pii-kms-policy
+  PiiTokenizationKey:
+    Type: AWS::KMS::Key
+    Condition: CreatePiiTokenizationKey
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Gentrail PII tokenization data keys
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountKeyAdministration
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+  DashboardPiiKmsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: pii-tokenization
+      Roles:
+        - Ref: NodeRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PiiTokenization
+            Effect: Allow
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource:
+              Fn::If:
+                - CreatePiiTokenizationKey
+                - Fn::GetAtt:
+                    - PiiTokenizationKey
+                    - Arn
+                - Ref: ExistingPiiTokenizationKeyArn
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:gentrail:purpose: pii-tokenization
+  # <<< GENERATED pii-kms-policy
   Vpc:
     Type: AWS::EC2::VPC
     Properties:
@@ -129,8 +188,6 @@ Resources:
           Description: All outbound (image pulls, k3s install, SSM, AWS APIs).
       Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-node" }]
 
-  # SSM core is the only managed policy: it is what enables SSM-only access. No
-  # ECR pull (the public mirror is anonymous), no S3/DDB/Bedrock (no real AWS).
   NodeRole:
     Type: AWS::IAM::Role
     Properties:
@@ -151,6 +208,7 @@ Resources:
 
   Node:
     Type: AWS::EC2::Instance
+    DependsOn: DashboardPiiKmsPolicy
     Properties:
       ImageId: !Ref LatestAl2023Ami
       InstanceType: !Ref InstanceType
@@ -158,6 +216,7 @@ Resources:
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds: [!Ref NodeSecurityGroup]
       MetadataOptions:
+        HttpPutResponseHopLimit: 2
         HttpTokens: required
         HttpEndpoint: enabled
       BlockDeviceMappings:
@@ -237,7 +296,7 @@ Resources:
             CHART=/opt/gentrail/src/charts/gentrail
             LICENSE_SET=""
             if [ -f /opt/gentrail/license.jwt ]; then LICENSE_SET="--set-file license.jwt=/opt/gentrail/license.jwt"; fi
-            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-appliance.yaml" --set createNamespace=false $LICENSE_SET --wait --timeout 15m
+            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-appliance.yaml" --set createNamespace=false --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set dashboard.useInstanceProfile=true $LICENSE_SET --wait --timeout 15m
             INSTALL
             chmod 600 /opt/gentrail/fetch.sh /opt/gentrail/install.sh
 
@@ -252,7 +311,9 @@ Resources:
             trap - ERR
             signal 0
             echo "gentrail appliance bootstrap complete (SelfInstall=${SelfInstall})"
-          - LicenseWrite: !If
+          - PiiTokenizationKeyArn: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
+            PiiTokenizationKeyRegion: !If [CreatePiiTokenizationKey, !Ref 'AWS::Region', !Select [3, !Split [':', !Ref ExistingPiiTokenizationKeyArn]]]
+            LicenseWrite: !If
               - HasLicense
               - !Sub '( umask 077; printf "%s" "${LicenseJwt}" > /opt/gentrail/license.jwt )'
               - "true"
@@ -262,6 +323,8 @@ Resources:
         Count: 1
 
 Outputs:
+  PiiTokenizationKeyArn:
+    Value: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
   InstanceId:
     Description: Appliance node instance id (gentrail connect / teardown reach it over SSM).
     Value: !Ref Node

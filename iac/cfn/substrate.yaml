@@ -24,10 +24,10 @@ Metadata:
           - NodeCountMin
           - NodeCountDesired
           - NodeCountMax
-          - EksLogTypes
       - Label: { default: "Encryption (P3)" }
         Parameters:
           - ExistingKmsKeyArn
+          - ExistingPiiTokenizationKeyArn
           - KmsKeyAlias
           - S3ObjectLockRetentionDays
       - Label: { default: "DynamoDB" }
@@ -79,6 +79,13 @@ Metadata:
           - ExternalId
 
 Parameters:
+  # >>> GENERATED pii-kms-parameters
+  ExistingPiiTokenizationKeyArn:
+    Type: String
+    Default: ""
+    AllowedPattern: ^$|^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$
+    Description: Optional existing PII tokenization key. Leave empty to create a retained rotating key. Its key policy must allow the dashboard role.
+  # <<< GENERATED pii-kms-parameters
   # ── Network ────────────────────────────────────────────────────────────
   VpcCidr:
     Type: String
@@ -126,9 +133,6 @@ Parameters:
     Type: Number
     Default: 6
     MinValue: 1
-  EksLogTypes:
-    Type: CommaDelimitedList
-    Default: "audit,authenticator,api"
 
   # ── Encryption (P3) ────────────────────────────────────────────────────
   ExistingKmsKeyArn:
@@ -334,17 +338,13 @@ Parameters:
       feature). Leave empty on the free tier: the cross-account scanner role is
       then not created and nothing reaches into this account.
 
-Mappings:
-  # AZ index → letter suffix. Used to name subnets predictably.
-  AzIndexToSuffix:
-    "0": { Suffix: "a" }
-    "1": { Suffix: "b" }
-    "2": { Suffix: "c" }
-    "3": { Suffix: "d" }
-    "4": { Suffix: "e" }
-    "5": { Suffix: "f" }
-
 Conditions:
+  # >>> GENERATED pii-kms-conditions
+  CreatePiiTokenizationKey:
+    Fn::Equals:
+      - Ref: ExistingPiiTokenizationKeyArn
+      - ""
+  # <<< GENERATED pii-kms-conditions
   # The cross-account security scanner is a paid feature, created only when BOTH
   # an ExternalId and a VendorAccountId are supplied, so the trust never renders
   # against an empty or defaulted account. Free-tier installs leave both empty.
@@ -361,11 +361,53 @@ Conditions:
   OtelPublic: !Equals [ !Ref OtelExposure, internet-facing ]
   HasCert: !Not [ !Equals [ !Ref ExistingAcmCertArn, "" ] ]
   ThreeOrMoreAzs: !Not [ !Equals [ !Ref AzCount, 2 ] ]
-  FourOrMoreAzs: !Or [ !Equals [ !Ref AzCount, 4 ], !Equals [ !Ref AzCount, 5 ], !Equals [ !Ref AzCount, 6 ] ]
-  FiveOrMoreAzs: !Or [ !Equals [ !Ref AzCount, 5 ], !Equals [ !Ref AzCount, 6 ] ]
-  SixAzs: !Equals [ !Ref AzCount, 6 ]
 
 Resources:
+  # >>> GENERATED pii-kms-policy
+  PiiTokenizationKey:
+    Type: AWS::KMS::Key
+    Condition: CreatePiiTokenizationKey
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Gentrail PII tokenization data keys
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountKeyAdministration
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+  DashboardPiiKmsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: pii-tokenization
+      Roles:
+        - Ref: DashboardIrsaRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PiiTokenization
+            Effect: Allow
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource:
+              Fn::If:
+                - CreatePiiTokenizationKey
+                - Fn::GetAtt:
+                    - PiiTokenizationKey
+                    - Arn
+                - Ref: ExistingPiiTokenizationKeyArn
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:gentrail:purpose: pii-tokenization
+  # <<< GENERATED pii-kms-policy
   # ── VPC ──────────────────────────────────────────────────────────────
   Vpc:
     Type: AWS::EC2::VPC
@@ -985,6 +1027,9 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: quota_expires_at
+        Enabled: true
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
@@ -1193,7 +1238,7 @@ Resources:
             Principal:
               # ELB account ID per region. us-west-2 = 797873946194.
               # For multi-region support, add a Mappings table by region.
-              AWS: !Sub "arn:aws:iam::797873946194:root"
+              AWS: "arn:aws:iam::797873946194:root"
             Action: s3:PutObject
             Resource: !Sub "${AlbLogsBucket.Arn}/*"
 
@@ -1231,6 +1276,11 @@ Resources:
 
   RdsInstance:
     Type: AWS::RDS::DBInstance
+    Metadata:
+      cfn-lint:
+        config:
+          # W3691 mistakes the supported major-only alias for a deprecated minor.
+          ignore_checks: [W3691]
     DeletionPolicy: Snapshot
     UpdateReplacePolicy: Snapshot
     Properties:
@@ -1538,6 +1588,7 @@ Resources:
                   - dynamodb:DeleteItem
                   - dynamodb:BatchGetItem
                   - dynamodb:BatchWriteItem
+                  - dynamodb:ConditionCheckItem
                 Resource:
                   - !GetAtt TracesTable.Arn
                   - !Sub "${TracesTable.Arn}/index/*"
@@ -2021,14 +2072,13 @@ Resources:
                   - dynamodb:Scan
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                   - dynamodb:BatchGetItem
                 Resource:
                   - !GetAtt TracesTable.Arn
                   - !Sub "${TracesTable.Arn}/index/*"
                   - !GetAtt ViolationsTable.Arn
                   - !Sub "${ViolationsTable.Arn}/index/*"
-                  - !GetAtt AgentStatsTable.Arn
-                  - !Sub "${AgentStatsTable.Arn}/index/*"
                   - !GetAtt PolicyRulesTable.Arn
                   - !GetAtt WindowMarkersTable.Arn
               - Sid: KmsDecrypt
@@ -2376,7 +2426,7 @@ Resources:
 
   BootstrapInstance:
     Type: AWS::EC2::Instance
-    DependsOn: [ NodeGroup, BootstrapAccessEntry, BootstrapApiIngress, RdsIngressFromClusterSg ]
+    DependsOn: [ NodeGroup, BootstrapAccessEntry, BootstrapApiIngress, RdsIngressFromClusterSg, DashboardPiiKmsPolicy ]
     Properties:
       ImageId: !Ref LatestAl2023Ami
       InstanceType: !Ref BootstrapInstanceType
@@ -2388,120 +2438,129 @@ Resources:
         Version: !GetAtt BootstrapLaunchTemplate.LatestVersionNumber
       Tags: [ { Key: Name, Value: !Sub "${AWS::StackName}-bootstrap" } ]
       UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          set -euxo pipefail
-          exec > /var/log/gentrail-install.log 2>&1
-          echo "gentrail in-cluster bootstrap, chart revision ${ChartRevision}"
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -euxo pipefail
+              exec > /var/log/gentrail-install.log 2>&1
+              echo "gentrail in-cluster bootstrap, chart revision ${ChartRevision}"
 
-          signal() { /opt/aws/bin/cfn-signal --exit-code "$1" --stack ${AWS::StackName} --resource BootstrapInstance --region ${AWS::Region} || true; }
-          trap 'signal 1' ERR
+              signal() { /opt/aws/bin/cfn-signal --exit-code "$1" --stack ${AWS::StackName} --resource BootstrapInstance --region ${AWS::Region} || true; }
+              trap 'signal 1' ERR
 
-          dnf install -y git tar gzip unzip aws-cfn-bootstrap || yum install -y git tar gzip aws-cfn-bootstrap
-          command -v aws >/dev/null || dnf install -y awscli
-          curl -sfLo /usr/local/bin/kubectl https://dl.k8s.io/release/v1.32.0/bin/linux/amd64/kubectl
-          chmod +x /usr/local/bin/kubectl
-          curl -sfL https://get.helm.sh/helm-v3.15.4-linux-amd64.tar.gz | tar -xz -C /tmp
-          install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+              dnf install -y git tar gzip unzip aws-cfn-bootstrap || yum install -y git tar gzip aws-cfn-bootstrap
+              command -v aws >/dev/null || dnf install -y awscli
+              curl -sfLo /usr/local/bin/kubectl https://dl.k8s.io/release/v1.32.0/bin/linux/amd64/kubectl
+              chmod +x /usr/local/bin/kubectl
+              curl -sfL https://get.helm.sh/helm-v3.15.4-linux-amd64.tar.gz | tar -xz -C /tmp
+              install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
 
-          IMAGE_TAG="${ImageTag}"
-          PUBLIC_HOST="${Hostname}"
-          OTEL_HOST="${OtelHostname}"
-          EXPORT_BUCKET="${ExportBucketName}"
-          GHCR_USER="${GhcrUser}"
-          GHCR_TOKEN="${GhcrToken}"
+              IMAGE_TAG="${ImageTag}"
+              PUBLIC_HOST="${Hostname}"
+              OTEL_HOST="${OtelHostname}"
+              EXPORT_BUCKET="${ExportBucketName}"
+              GHCR_USER="${GhcrUser}"
+              GHCR_TOKEN="${GhcrToken}"
 
-          export KUBECONFIG=/root/.kube/config
-          mkdir -p /root/.kube
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if aws eks update-kubeconfig --name ${EksCluster} --region ${AWS::Region} --kubeconfig "$KUBECONFIG" && kubectl get --raw /readyz >/dev/null 2>&1; then break; fi
-            echo "waiting for cluster API + access entry ($i)"; sleep 12
-          done
+              export KUBECONFIG=/root/.kube/config
+              mkdir -p /root/.kube
+              for i in 1 2 3 4 5 6 7 8 9 10; do
+                if aws eks update-kubeconfig --name ${EksCluster} --region ${AWS::Region} --kubeconfig "$KUBECONFIG" && kubectl get --raw /readyz >/dev/null 2>&1; then break; fi
+                echo "waiting for cluster API + access entry ($i)"; sleep 12
+              done
 
-          kubectl apply -f - <<'SA'
-          apiVersion: v1
-          kind: ServiceAccount
-          metadata:
-            name: aws-load-balancer-controller
-            namespace: kube-system
-            annotations:
-              eks.amazonaws.com/role-arn: ${AlbControllerIrsaRole.Arn}
-          SA
-          helm repo add eks https://aws.github.io/eks-charts
-          helm repo update
-          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller --namespace kube-system --version 1.8.2 --set clusterName=${EksCluster} --set region=${AWS::Region} --set vpcId=${Vpc} --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller --wait --timeout 5m
+              kubectl apply -f - <<'SA'
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: aws-load-balancer-controller
+                namespace: kube-system
+                annotations:
+                  eks.amazonaws.com/role-arn: ${AlbControllerIrsaRole.Arn}
+              SA
+              helm repo add eks https://aws.github.io/eks-charts
+              helm repo update
+              helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller --namespace kube-system --version 1.8.2 --set clusterName=${EksCluster} --set region=${AWS::Region} --set vpcId=${Vpc} --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller --wait --timeout 5m
 
-          # EKS ships CoreDNS with a PodDisruptionBudget that stalls a node drain when
-          # its last replica has nowhere to go: ~4 extra minutes on every teardown.
-          # Drains here are one node at a time, so a fully-unavailable budget only
-          # risks a seconds-long DNS blip during a nodegroup update.
-          kubectl patch pdb coredns -n kube-system --type merge -p '{"spec":{"maxUnavailable":"100%"}}' || true
+              # EKS ships CoreDNS with a PodDisruptionBudget that stalls a node drain when
+              # its last replica has nowhere to go: ~4 extra minutes on every teardown.
+              # Drains here are one node at a time, so a fully-unavailable budget only
+              # risks a seconds-long DNS blip during a nodegroup update.
+              kubectl patch pdb coredns -n kube-system --type merge -p '{"spec":{"maxUnavailable":"100%"}}' || true
 
-          SRC=/opt/gentrail/src
-          rm -rf "$SRC"
-          git clone --depth 1 --branch "${RepoBranch}" "${PublicRepoUrl}" "$SRC"
-          CHART=$SRC/charts/gentrail
+              SRC=/opt/gentrail/src
+              rm -rf "$SRC"
+              git clone --depth 1 --branch "${RepoBranch}" "${PublicRepoUrl}" "$SRC"
+              CHART=$SRC/charts/gentrail
 
-          mkdir -p /opt/gentrail
-          cat > /opt/gentrail/values.yaml <<'VALUES'
-          mode: eks
-          aws:
-            region: ${AWS::Region}
-          cloudflared:
-            enabled: false
-          image:
-            registry: public.ecr.aws/p6a2v1k1
-          ingress:
-            targetGroups:
-              dashboardArn: ${DashboardTargetGroup}
-              otelArn: ${OtelTargetGroup}
-          ddb:
-            tablePrefix: ${DdbTableNamePrefix}
-          s3:
-            evidenceBucket: ${EvidenceBucket}
-          rds:
-            instanceId: ${ClusterName}-rds
-            secretArn: ${RdsMasterSecret}
-          llm:
-            provider: bedrock
-            model: ${BedrockModelId}
-          irsa:
-            dashboard: ${DashboardIrsaRole.Arn}
-            policyEngine: ${PolicyEngineIrsaRole.Arn}
-            evaluator: ${EvaluatorIrsaRole.Arn}
-            exporter: ${ExporterIrsaRole.Arn}
-            authproxy: ${AuthproxyIrsaRole.Arn}
-            rdsBootstrap: ${RdsBootstrapIrsaRole.Arn}
-          license:
-            secretRef: gentrail-license
-          VALUES
+              mkdir -p /opt/gentrail
+              cat > /opt/gentrail/values.yaml <<'VALUES'
+              mode: eks
+              aws:
+                region: ${AWS::Region}
+              cloudflared:
+                enabled: false
+              image:
+                registry: public.ecr.aws/p6a2v1k1
+              ingress:
+                targetGroups:
+                  dashboardArn: ${DashboardTargetGroup}
+                  otelArn: ${OtelTargetGroup}
+              dashboard:
+                piiKmsKeyArn: ${PiiTokenizationKeyArn}
+                piiKmsRegion: ${PiiTokenizationKeyRegion}
+              ddb:
+                tablePrefix: ${DdbTableNamePrefix}
+              s3:
+                evidenceBucket: ${EvidenceBucket}
+              rds:
+                instanceId: ${ClusterName}-rds
+                secretArn: ${RdsMasterSecret}
+              llm:
+                provider: bedrock
+                model: ${BedrockModelId}
+              irsa:
+                dashboard: ${DashboardIrsaRole.Arn}
+                policyEngine: ${PolicyEngineIrsaRole.Arn}
+                evaluator: ${EvaluatorIrsaRole.Arn}
+                exporter: ${ExporterIrsaRole.Arn}
+                authproxy: ${AuthproxyIrsaRole.Arn}
+                rdsBootstrap: ${RdsBootstrapIrsaRole.Arn}
+              license:
+                secretRef: gentrail-license
+              VALUES
 
-          kubectl create namespace gentrail --dry-run=client -o yaml | kubectl apply -f -
+              kubectl create namespace gentrail --dry-run=client -o yaml | kubectl apply -f -
 
-          HELM_EXTRA=""
-          if [ -n "$IMAGE_TAG" ]; then HELM_EXTRA="$HELM_EXTRA --set image.tag=$IMAGE_TAG"; fi
-          if [ -n "$OTEL_HOST" ]; then HELM_EXTRA="$HELM_EXTRA --set ingress.otelInternal=false"; fi
-          if [ -n "$PUBLIC_HOST" ]; then HELM_EXTRA="$HELM_EXTRA --set ingress.dashboardInternal=false"; fi
-          if [ -n "$EXPORT_BUCKET" ]; then HELM_EXTRA="$HELM_EXTRA --set exporter.target=s3://$EXPORT_BUCKET/${ExportPrefix}"; fi
-          if [ -n "$GHCR_TOKEN" ]; then
-            set +x
-            kubectl -n gentrail create secret docker-registry ghcr --docker-server=ghcr.io --docker-username="$GHCR_USER" --docker-password="$GHCR_TOKEN" --dry-run=client -o yaml | kubectl apply -f -
-            set -x
-            HELM_EXTRA="$HELM_EXTRA --set image.pullSecret=ghcr"
-          fi
+              HELM_EXTRA=""
+              if [ -n "$IMAGE_TAG" ]; then HELM_EXTRA="$HELM_EXTRA --set image.tag=$IMAGE_TAG"; fi
+              if [ -n "$OTEL_HOST" ]; then HELM_EXTRA="$HELM_EXTRA --set ingress.otelInternal=false"; fi
+              if [ -n "$PUBLIC_HOST" ]; then HELM_EXTRA="$HELM_EXTRA --set ingress.dashboardInternal=false"; fi
+              if [ -n "$EXPORT_BUCKET" ]; then HELM_EXTRA="$HELM_EXTRA --set exporter.target=s3://$EXPORT_BUCKET/${ExportPrefix}"; fi
+              if [ -n "$GHCR_TOKEN" ]; then
+                set +x
+                kubectl -n gentrail create secret docker-registry ghcr --docker-server=ghcr.io --docker-username="$GHCR_USER" --docker-password="$GHCR_TOKEN" --dry-run=client -o yaml | kubectl apply -f -
+                set -x
+                HELM_EXTRA="$HELM_EXTRA --set image.pullSecret=ghcr"
+              fi
 
-          helm upgrade --install gentrail "$CHART" -n gentrail -f /opt/gentrail/values.yaml --set createNamespace=false $HELM_EXTRA --wait --timeout 12m
+              helm upgrade --install gentrail "$CHART" -n gentrail -f /opt/gentrail/values.yaml --set createNamespace=false $HELM_EXTRA --wait --timeout 12m
 
-          trap - ERR
-          signal 0
-          echo "gentrail in-cluster bootstrap complete"
-          shutdown -h now
+              trap - ERR
+              signal 0
+              echo "gentrail in-cluster bootstrap complete"
+              shutdown -h now
+            - PiiTokenizationKeyArn: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
+              PiiTokenizationKeyRegion: !If [CreatePiiTokenizationKey, !Ref 'AWS::Region', !Select [3, !Split [':', !Ref ExistingPiiTokenizationKeyArn]]]
     CreationPolicy:
       ResourceSignal:
         Timeout: PT30M
         Count: 1
 
 Outputs:
+  PiiTokenizationKeyArn:
+    Value: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
   Tier:
     Description: Marks this stack as the production (EKS/RDS) substrate tier.
     Value: prod

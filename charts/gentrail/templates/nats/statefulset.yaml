@@ -1,3 +1,4 @@
+{{- include "gentrail.natsStorageGuard" (dict "storage" .Values.nats.storage "existing" (lookup "apps/v1" "StatefulSet" .Release.Namespace "nats")) }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -43,5 +44,20 @@ spec:
       volumes:
         - name: config
           configMap: { name: nats }
+        {{- if eq .Values.nats.storage "ephemeral" }}
         - name: data
           emptyDir: { sizeLimit: {{ .Values.nats.jetstreamSize | quote }} }
+        {{- end }}
+  {{- if eq .Values.nats.storage "persistent" }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- if .Values.storage.class }}
+        storageClassName: {{ .Values.storage.class | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.nats.jetstreamSize | quote }}
+  {{- end }}

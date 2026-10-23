@@ -42,8 +42,6 @@ spec:
               value: "{{ .Values.ddb.tablePrefix }}-traces{{ .Values.ddb.tableSuffix }}"
             - name: DYNAMO_VIOLATIONS_TABLE
               value: "{{ .Values.ddb.tablePrefix }}-violations{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_AGENT_STATS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-agent-stats{{ .Values.ddb.tableSuffix }}"
             - name: DYNAMO_POLICY_RULES_TABLE
               value: "{{ .Values.ddb.tablePrefix }}-policy-rules{{ .Values.ddb.tableSuffix }}"
             - name: DYNAMO_WINDOW_MARKERS_TABLE

@@ -7,6 +7,8 @@ metadata:
 {{ include "gentrail.labels" (merge (dict "component" "dashboard") .) | indent 4 }}
 spec:
   replicas: {{ .Values.dashboard.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "dashboard") .) | indent 6 }}
@@ -32,6 +34,12 @@ spec:
           env:
             - name: AWS_REGION
               value: {{ .Values.aws.region | quote }}
+            {{- if .Values.dashboard.piiKmsKeyArn }}
+            - name: GENTRAIL_PII_KMS_KEY_ARN
+              value: {{ .Values.dashboard.piiKmsKeyArn | quote }}
+            - name: GENTRAIL_PII_KMS_REGION
+              value: {{ .Values.dashboard.piiKmsRegion | default (index (splitList ":" .Values.dashboard.piiKmsKeyArn) 3) | quote }}
+            {{- end }}
             - name: DYNAMO_TRACES_TABLE
               value: "{{ .Values.ddb.tablePrefix }}-traces{{ .Values.ddb.tableSuffix }}"
             - name: DYNAMO_VIOLATIONS_TABLE
@@ -114,7 +122,12 @@ spec:
             - name: DASHBOARD_ALLOW_FRAMING
               value: "true"
             {{- end }}
+            {{- if and .Values.dashboard.useInstanceProfile .Values.ddb.endpoint }}
+            - name: AWS_ENDPOINT_URL_DYNAMODB
+              value: {{ .Values.ddb.endpoint | quote }}
+            {{- else }}
 {{- include "gentrail.localEnv" . | nindent 12 }}
+            {{- end }}
             {{- if and .Values.irsa.dashboard (eq .Values.mode "k3s") }}
 {{- include "gentrail.irsaEnv" .Values.irsa.dashboard | nindent 12 }}
             {{- end }}
