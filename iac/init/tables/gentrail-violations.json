@@ -31,6 +31,10 @@
     {
       "AttributeName": "GSI3SK",
       "AttributeType": "S"
+    },
+    {
+      "AttributeName": "created_at",
+      "AttributeType": "N"
     }
   ],
   "BillingMode": "PAY_PER_REQUEST",
@@ -49,6 +53,41 @@
       ],
       "Projection": {
         "ProjectionType": "ALL"
+      }
+    },
+    {
+      "IndexName": "org-created-index",
+      "KeySchema": [
+        {
+          "AttributeName": "GSI1PK",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "created_at",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "NonKeyAttributes": [
+          "violation_id",
+          "org_id",
+          "rule_id",
+          "rule_name",
+          "action",
+          "reason",
+          "event_type",
+          "source_id",
+          "source_type",
+          "outcome",
+          "agent_id",
+          "agent_name",
+          "trace_received_at",
+          "triage_status",
+          "triage_notes",
+          "triaged_by",
+          "triaged_at"
+        ],
+        "ProjectionType": "INCLUDE"
       }
     },
     {

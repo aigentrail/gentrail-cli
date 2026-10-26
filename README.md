@@ -10,9 +10,9 @@ Choose the download for your computer:
 
 | Platform | Downloads                                                                                                                                                                                                                                                                          |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows  | [Most PCs (x64)](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.11.2/gentrail-setup-windows-amd64.exe) · [ARM64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.11.2/gentrail-setup-windows-arm64.exe) |
-| macOS    | [Apple Silicon](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.11.2/gentrail-setup-darwin-arm64.zip) · [Intel](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.11.2/gentrail-setup-darwin-amd64.zip)    |
-| Linux    | [x64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.11.2/gentrail-setup-linux-amd64.tar.gz) · [ARM64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.11.2/gentrail-setup-linux-arm64.tar.gz)          |
+| Windows  | [Most PCs (x64)](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.12.0/gentrail-setup-windows-amd64.exe) · [ARM64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.12.0/gentrail-setup-windows-arm64.exe) |
+| macOS    | [Apple Silicon](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.12.0/gentrail-setup-darwin-arm64.zip) · [Intel](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.12.0/gentrail-setup-darwin-amd64.zip)    |
+| Linux    | [x64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.12.0/gentrail-setup-linux-amd64.tar.gz) · [ARM64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.12.0/gentrail-setup-linux-arm64.tar.gz)          |
 
 1. Open the Windows installer, or extract the macOS/Linux archive and open
    Gentrail Setup. Installation is for your user account.

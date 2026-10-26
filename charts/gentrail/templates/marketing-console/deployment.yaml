@@ -1,8 +1,4 @@
 {{- if .Values.marketingConsole.enabled }}
-# marketing-console: the campaign-link UI, our-cloud-only (gated off for BYOC).
-# It calls the events-gateway admin routes (gatewayUrl) authenticated with an
-# admin secret it fetches from SSM at boot via IRSA, and gates every route on the
-# shared dashboard session cookie (AIGENTRAIL_SESSION_SECRET).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,20 +45,15 @@ spec:
             {{- end }}
             - name: AWS_REGION
               value: {{ .Values.aws.region | quote }}
-            - name: DASHBOARD_INTERNAL_URL
-              value: {{ .Values.marketingConsole.dashboardInternalUrl | quote }}
-            {{- $cookieDomain := .Values.marketingConsole.cookieDomain | default .Values.dashboard.cookieDomain }}
-            {{- if $cookieDomain }}
-            - name: AIGENTRAIL_COOKIE_DOMAIN
-              value: {{ $cookieDomain | quote }}
-            {{- end }}
-            {{- if .Values.dashboard.sessionSecretName }}
-            - name: AIGENTRAIL_SESSION_SECRET
+            - name: AUTHENTICATION_CONFIG_FILE
+              value: /etc/gentrail-auth/config/authentication.json
+            - name: AUTHENTICATION_SECRETS_DIR
+              value: /etc/gentrail-auth/client-secrets
+            - name: AUTHENTICATION_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.dashboard.sessionSecretName }}
-                  key: session-secret
-            {{- end }}
+                  name: {{ required "marketingConsole.authenticationSecretName is required" .Values.marketingConsole.authenticationSecretName }}
+                  key: database-url
             {{- if and .Values.irsa.marketingConsole (eq .Values.mode "k3s") }}
 {{- include "gentrail.irsaEnv" .Values.irsa.marketingConsole | nindent 12 }}
             {{- end }}
@@ -75,12 +66,32 @@ spec:
             tcpSocket: { port: http }
             initialDelaySeconds: 30
             periodSeconds: 30
-          {{- if and .Values.irsa.marketingConsole (eq .Values.mode "k3s") }}
           volumeMounts:
+            - name: authentication-configuration
+              mountPath: /etc/gentrail-auth/config
+              readOnly: true
+            - name: authentication-client
+              mountPath: /etc/gentrail-auth/client-secrets
+              readOnly: true
+            {{- if and .Values.irsa.marketingConsole (eq .Values.mode "k3s") }}
 {{- include "gentrail.irsaTokenMount" . | nindent 12 }}
-          {{- end }}
-      {{- if and .Values.irsa.marketingConsole (eq .Values.mode "k3s") }}
+            {{- end }}
       volumes:
+        - name: authentication-configuration
+          secret:
+            secretName: {{ .Values.marketingConsole.authenticationSecretName }}
+            defaultMode: 0440
+            items:
+              - key: authentication.json
+                path: authentication.json
+        - name: authentication-client
+          secret:
+            secretName: {{ .Values.marketingConsole.authenticationSecretName }}
+            defaultMode: 0440
+            items:
+              - key: client-secret
+                path: client-secret
+        {{- if and .Values.irsa.marketingConsole (eq .Values.mode "k3s") }}
 {{- include "gentrail.irsaTokenVolume" . | nindent 8 }}
-      {{- end }}
+        {{- end }}
 {{- end }}

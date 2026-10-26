@@ -1,3 +1,4 @@
+{{- if .Values.authproxy.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -70,3 +71,5 @@ spec:
           {{- if and .Values.irsa.authproxy (eq .Values.mode "k3s") }}
 {{- include "gentrail.irsaTokenVolume" . | nindent 8 }}
           {{- end }}
+
+{{- end }}

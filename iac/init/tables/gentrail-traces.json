@@ -11,6 +11,10 @@
     {
       "AttributeName": "GSI1PK",
       "AttributeType": "S"
+    },
+    {
+      "AttributeName": "received_at",
+      "AttributeType": "N"
     }
   ],
   "BillingMode": "PAY_PER_REQUEST",
@@ -29,6 +33,29 @@
       ],
       "Projection": {
         "ProjectionType": "ALL"
+      }
+    },
+    {
+      "IndexName": "org-receipt-index",
+      "KeySchema": [
+        {
+          "AttributeName": "PK",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "received_at",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "NonKeyAttributes": [
+          "trace_id",
+          "agent_id",
+          "total_tokens",
+          "evidence_kind",
+          "item_type"
+        ],
+        "ProjectionType": "INCLUDE"
       }
     }
   ],

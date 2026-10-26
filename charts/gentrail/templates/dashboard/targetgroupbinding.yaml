@@ -1,3 +1,4 @@
+{{- if .Values.dashboard.enabled }}
 {{- if .Values.ingress.targetGroups.dashboardArn }}
 apiVersion: elbv2.k8s.aws/v1beta1
 kind: TargetGroupBinding
@@ -10,4 +11,6 @@ spec:
     port: 8001
   targetGroupARN: {{ .Values.ingress.targetGroups.dashboardArn | quote }}
   targetType: ip
+{{- end }}
+
 {{- end }}

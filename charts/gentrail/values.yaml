@@ -23,7 +23,7 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.11.2
+  tag: v0.12.0
   pullPolicy: IfNotPresent
   pullSecret: ""
 
@@ -103,6 +103,8 @@ license:
 
 
 dashboard:
+  enabled: true
+  companySignIn: null
   piiKmsKeyArn: ""
   piiKmsRegion: ""
   useInstanceProfile: false
@@ -148,6 +150,7 @@ dashboard:
 # The dashboard works without it; AI policy extraction is the only feature it
 # powers.
 policyEngine:
+  enabled: true
   replicaCount: 0
   resources:
     requests: { cpu: 200m, memory: 256Mi }
@@ -164,6 +167,7 @@ nats:
     limits:   { cpu: 500m, memory: 512Mi }
 
 evaluator:
+  enabled: true
   replicaCount: 1
   resources:
     requests: { cpu: 100m, memory: 128Mi }
@@ -178,6 +182,7 @@ exporter:
     limits:   { cpu: 500m, memory: 512Mi }
 
 authproxy:
+  enabled: true
   replicaCount: 1
   resources:
     requests: { cpu: 100m, memory: 128Mi }
@@ -209,9 +214,7 @@ sidecar:
 
 # docs-server (the internal wiki). Our-cloud-only: enabled false so a BYOC install
 # never renders it (like cloudflared/local). infra/k3s-apps enables it, supplies
-# the binaries bucket, and routes the wiki hostname to it on the k3s tunnel. It
-# shares the dashboard's session cookie (dashboard.sessionSecretName +
-# dashboard.cookieDomain) so a dashboard login authenticates the wiki.
+# the binaries bucket, and routes the wiki hostname to it on the k3s tunnel.
 docsServer:
   enabled: false
   # Binaries bucket holding the docs tarball + the live-edit write-through prefix.
@@ -220,12 +223,7 @@ docsServer:
   editsS3Bucket: ""
   editsS3Prefix: "intranet-docs/data/"
   docsTarballKey: "intranet-docs/docs.tar.gz"
-  # Session cookie Domain for the wiki. Empty inherits dashboard.cookieDomain
-  # (same parent domain). Set explicitly when the wiki lives on a different
-  # parent (e.g. ".gentrail.ai" for the wiki while the dashboard sits on a different parent).
-  cookieDomain: ""
-  # In-cluster dashboard URL the wiki's login form bridges to (shared auth API).
-  dashboardInternalUrl: "http://dashboard:8001"
+  authenticationSecretName: "gentrail-wiki-authentication"
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits:   { cpu: 250m, memory: 150Mi }
@@ -246,15 +244,6 @@ agentChat:
     requests: { cpu: 25m, memory: 64Mi }
     limits:   { cpu: 250m, memory: 200Mi }
 
-# marketing-console (the campaign-link UI). Our-cloud-only: enabled false so a
-# BYOC install never renders it. gatewayUrl is the events-gateway public API base
-# (infra/k3s-apps reads it from that stack's remote state); adminSecretParam is
-# fetched from SSM at boot via IRSA (irsa.marketingConsole), so the admin secret
-# never lands in values or state. dashboardInternalUrl is the in-cluster dashboard
-# its login form bridges to (docs-server pattern). cookieDomain is set per stage by
-# infra/k3s-apps: parent-scoped (.gentrail.ai) on prod so the console shares the one
-# gentrail_session with dashboard + wiki, host-scoped on dev where a flat-sibling
-# host cannot read the dashboard's cookie (the bridge mints its own there).
 marketingConsole:
   enabled: false
   gatewayUrl: ""
@@ -263,8 +252,7 @@ marketingConsole:
   # Origin+prefix tracked links hang off. Empty = publicBase + /go. Prod sets the
   # short host https://link.gentrail.ai (infra/k3s-apps).
   shortBase: ""
-  dashboardInternalUrl: "http://dashboard:8001"
-  cookieDomain: ""
+  authenticationSecretName: gentrail-marketing-authentication
   port: 8085
   resources:
     requests: { cpu: 25m, memory: 64Mi }

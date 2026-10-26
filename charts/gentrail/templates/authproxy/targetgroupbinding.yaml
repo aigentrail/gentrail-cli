@@ -1,3 +1,4 @@
+{{- if .Values.authproxy.enabled }}
 {{- if .Values.ingress.targetGroups.otelArn }}
 apiVersion: elbv2.k8s.aws/v1beta1
 kind: TargetGroupBinding
@@ -10,4 +11,6 @@ spec:
     port: 4318
   targetGroupARN: {{ .Values.ingress.targetGroups.otelArn | quote }}
   targetType: ip
+{{- end }}
+
 {{- end }}

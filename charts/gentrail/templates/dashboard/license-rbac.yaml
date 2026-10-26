@@ -1,3 +1,4 @@
+{{- if .Values.dashboard.enabled }}
 # The in-product license upload patches exactly one secret: the mounted
 # license that every service hot-reloads. get+patch on that one name, nothing
 # else, so a compromised dashboard cannot read or touch any other secret.
@@ -25,3 +26,5 @@ subjects:
   - kind: ServiceAccount
     name: dashboard
     namespace: {{ .Release.Namespace }}
+
+{{- end }}

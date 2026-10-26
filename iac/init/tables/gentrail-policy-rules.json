@@ -7,9 +7,27 @@
     {
       "AttributeName": "SK",
       "AttributeType": "S"
+    },
+    {
+      "AttributeName": "enabled_flag",
+      "AttributeType": "S"
     }
   ],
   "BillingMode": "PAY_PER_REQUEST",
+  "GlobalSecondaryIndexes": [
+    {
+      "IndexName": "enabled-index",
+      "KeySchema": [
+        {
+          "AttributeName": "enabled_flag",
+          "KeyType": "HASH"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "KEYS_ONLY"
+      }
+    }
+  ],
   "KeySchema": [
     {
       "AttributeName": "PK",
