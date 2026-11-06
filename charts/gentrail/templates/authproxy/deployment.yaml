@@ -31,8 +31,6 @@ spec:
             - name: otlp
               containerPort: 4318
           env:
-            - name: AWS_REGION
-              value: {{ .Values.aws.region | quote }}
             - name: PORT
               value: "4318"
             - name: EVENT_BUS
@@ -41,17 +39,13 @@ spec:
               value: "nats://nats:4222"
             - name: NATS_STREAM_REPLICAS
               value: {{ .Values.nats.replicas | quote }}
-            - name: DYNAMO_TRACES_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-traces{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_AGENT_STATS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-agent-stats{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_API_KEYS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-api-keys{{ .Values.ddb.tableSuffix }}"
+{{ include "gentrail.traceStorageEnv" . | indent 12 }}
+            - name: CREDENTIALS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gentrail-rds-secret
+                  key: dsn
 {{- include "gentrail.licenseEnv" . | nindent 12 }}
-{{- include "gentrail.localEnv" . | nindent 12 }}
-            {{- if and .Values.irsa.authproxy (eq .Values.mode "k3s") }}
-{{- include "gentrail.irsaEnv" .Values.irsa.authproxy | nindent 12 }}
-            {{- end }}
           resources: {{- toYaml .Values.authproxy.resources | nindent 12 }}
           readinessProbe:
             httpGet: { path: /healthz, port: otlp }
@@ -63,13 +57,7 @@ spec:
             periodSeconds: 30
           volumeMounts:
 {{- include "gentrail.licenseMount" . | nindent 12 }}
-          {{- if and .Values.irsa.authproxy (eq .Values.mode "k3s") }}
-{{- include "gentrail.irsaTokenMount" . | nindent 12 }}
-          {{- end }}
       volumes:
 {{- include "gentrail.licenseVolume" . | nindent 8 }}
-          {{- if and .Values.irsa.authproxy (eq .Values.mode "k3s") }}
-{{- include "gentrail.irsaTokenVolume" . | nindent 8 }}
-          {{- end }}
 
 {{- end }}

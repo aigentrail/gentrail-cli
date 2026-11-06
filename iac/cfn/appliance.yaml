@@ -1,13 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Gentrail BYOC evaluation appliance: a single EC2 node running k3s that
-  self-installs the Gentrail chart (values-appliance.yaml) on first boot. The
-  whole stack runs in-cluster (Postgres + NATS + dynamodb-local), so no RDS, no
-  real DynamoDB, no S3, no IRSA. Tokenization uses an AWS KMS key through the
-  node role. Access is SSM-only: the security group has zero
-  inbound rules and there is no SSH key. Single-AZ, node-local storage, no
-  managed backups: an evaluation box, NOT a system of record.
-
+  Gentrail standard installation: ARM64 k3s on one EC2 node, private managed PostgreSQL, retained S3 evidence with Object Lock, and SSM access. Single-AZ application and database; no EKS, NAT gateway or load balancer.
 Parameters:
   # >>> GENERATED pii-kms-parameters
   ExistingPiiTokenizationKeyArn:
@@ -18,60 +11,61 @@ Parameters:
   # <<< GENERATED pii-kms-parameters
   InstanceType:
     Type: String
-    Default: t3.large
-    Description: >-
-      The whole stack (Postgres, NATS, dynamodb-local, dashboard, evaluator,
-      authproxy) runs on this one node; t3.large (2 vCPU / 8 GiB) is the floor.
-    AllowedValues: [t3.large, t3.xlarge, m5.large, m5.xlarge]
-
+    Default: t4g.medium
+    Description: ARM64 application node. Capacity must be qualified for the selected modules and workload.
+    AllowedValues: [t4g.medium, t4g.large, t4g.xlarge, m7g.large, m7g.xlarge]
+  RdsBackupRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+  EvidenceRetentionDays:
+    Type: Number
+    Default: 2555
+    MinValue: 1
+    MaxValue: 36500
+  TunnelToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    AllowedPattern: ^$|^[A-Za-z0-9_+/=.-]{1,1000}$
+    MaxLength: 1000
+    Description: Optional existing Cloudflare Tunnel token. Empty keeps access SSM-only.
   RootVolumeSizeGiB:
     Type: Number
     Default: 50
     MinValue: 30
     Description: Encrypted gp3 root volume; holds images plus all PVC data (local-path).
-
   LatestAl2023Ami:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
     Description: Resolved at deploy time from the public AL2023 SSM alias. Do not override.
-
   PublicRepoUrl:
     Type: String
     Default: https://github.com/aigentrail/gentrail-cli.git
     Description: The public BYOC repo the node clones to self-install the chart + init specs.
-
   RepoBranch:
     Type: String
     Default: main
     Description: Branch of the public repo to clone (pin a release branch, or a test branch).
-
   SelfInstall:
     Type: String
     Default: "true"
     AllowedValues: ["true", "false"]
     Description: >-
-      true (the bash installer): the box installs the chart itself on first boot.
-      false (the gentrail CLI): the box boots bare k3s and the CLI drives the chart
-      install over SSM so it shows as discrete steps.
-
+      true (the bash installer): the box installs the chart itself on first boot. false (the gentrail CLI): the box boots bare k3s and the CLI drives the chart install over SSM so it shows as discrete steps.
   LicenseJwt:
     Type: String
     Default: ""
     NoEcho: true
     Description: >-
-      Optional license JWT to pre-seed. Leave empty to boot unlicensed and paste
-      the license in the dashboard (the chart seeds an empty license secret).
-
+      Optional license JWT to pre-seed. Leave empty to boot unlicensed and paste the license in the dashboard (the chart seeds an empty license secret).
   VpcCidr:
     Type: String
     # Must not overlap k3s's default pod CIDR 10.42.0.0/16 or service CIDR
     # 10.43.0.0/16: a collision shadows the VPC DNS resolver (.2) behind the pod
     # network, so coredns loop-detects, dies, and cluster DNS goes down.
     Default: 10.20.0.0/16
-  SubnetCidr:
-    Type: String
-    Default: 10.20.0.0/24
-
 Conditions:
   # >>> GENERATED pii-kms-conditions
   CreatePiiTokenizationKey:
@@ -80,7 +74,7 @@ Conditions:
       - ""
   # <<< GENERATED pii-kms-conditions
   HasLicense: !Not [!Equals [!Ref LicenseJwt, ""]]
-
+  HasTunnel: !Not [!Equals [!Ref TunnelToken, ""]]
 Resources:
   # >>> GENERATED pii-kms-policy
   PiiTokenizationKey:
@@ -133,34 +127,29 @@ Resources:
       CidrBlock: !Ref VpcCidr
       EnableDnsSupport: true
       EnableDnsHostnames: true
-      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-vpc" }]
-
+      Tags: [{Key: Name, Value: !Sub "${AWS::StackName}-vpc"}]
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
-      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-igw" }]
-
+      Tags: [{Key: Name, Value: !Sub "${AWS::StackName}-igw"}]
   VpcGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref Vpc
       InternetGatewayId: !Ref InternetGateway
-
   PublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: !Ref SubnetCidr
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 3, 8]]
       AvailabilityZone: !Select [0, !GetAZs ""]
       MapPublicIpOnLaunch: true
-      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-public" }]
-
+      Tags: [{Key: Name, Value: !Sub "${AWS::StackName}-public"}]
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref Vpc
-      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-public-rt" }]
-
+      Tags: [{Key: Name, Value: !Sub "${AWS::StackName}-public-rt"}]
   PublicDefaultRoute:
     Type: AWS::EC2::Route
     DependsOn: VpcGatewayAttachment
@@ -168,13 +157,11 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
-
   PublicSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
-
   # Egress-only: the box pulls k3s, the chart, and images outbound and is reached
   # purely over SSM, so it needs no inbound rule (mirrors the dev k3s node SG).
   NodeSecurityGroup:
@@ -186,8 +173,121 @@ Resources:
         - IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
           Description: All outbound (image pulls, k3s install, SSM, AWS APIs).
-      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-node" }]
-
+      Tags: [{Key: Name, Value: !Sub "${AWS::StackName}-node"}]
+  DatabaseSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 3, 8]]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+  DatabaseSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 3, 8]]
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+  DatabaseSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private database subnets without internet routes
+      SubnetIds: [!Ref DatabaseSubnetA, !Ref DatabaseSubnetB]
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL from the application node only
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref NodeSecurityGroup
+  RdsInstance:
+    Type: AWS::RDS::DBInstance
+    Metadata:
+      cfn-lint:
+        config:
+          # W3691 mistakes the supported major-only alias for a deprecated minor.
+          ignore_checks: [W3691]
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: postgres
+      EngineVersion: "16"
+      DBInstanceClass: db.t4g.micro
+      DBName: gentrail
+      MasterUsername: gentrail
+      ManageMasterUserPassword: true
+      AllocatedStorage: "20"
+      MaxAllocatedStorage: 100
+      StorageType: gp3
+      StorageEncrypted: true
+      MultiAZ: false
+      PubliclyAccessible: false
+      BackupRetentionPeriod: !Ref RdsBackupRetentionDays
+      DeletionProtection: true
+      DBSubnetGroupName: !Ref DatabaseSubnets
+      VPCSecurityGroups: [!GetAtt DatabaseSecurityGroup.GroupId]
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ObjectLockEnabled: true
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention: {Mode: GOVERNANCE, Days: !Ref EvidenceRetentionDays}
+  TraceArchiveBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+  TunnelSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasTunnel
+    Properties:
+      Description: Gentrail standard tunnel connector credential
+      SecretString: !Ref TunnelToken
+  ApplicationStoragePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: standard-storage
+      Roles: [!Ref NodeRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !If
+              - HasTunnel
+              - [!GetAtt RdsInstance.MasterUserSecret.SecretArn, !Ref TunnelSecret]
+              - [!GetAtt RdsInstance.MasterUserSecret.SecretArn]
+          - Effect: Allow
+            Action: ['s3:ListBucket', 's3:GetBucketLocation']
+            Resource: [!GetAtt EvidenceBucket.Arn, !GetAtt TraceArchiveBucket.Arn]
+          - Effect: Allow
+            Action: ['s3:GetObject', 's3:GetObjectVersion', 's3:PutObject', 's3:PutObjectRetention']
+            Resource: [!Sub '${EvidenceBucket.Arn}/*', !Sub '${TraceArchiveBucket.Arn}/*']
   NodeRole:
     Type: AWS::IAM::Role
     Properties:
@@ -195,20 +295,18 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: ec2.amazonaws.com }
+            Principal: {Service: ec2.amazonaws.com}
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-node" }]
-
+      Tags: [{Key: Name, Value: !Sub "${AWS::StackName}-node"}]
   NodeInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Roles: [!Ref NodeRole]
-
   Node:
     Type: AWS::EC2::Instance
-    DependsOn: DashboardPiiKmsPolicy
+    DependsOn: [DashboardPiiKmsPolicy, ApplicationStoragePolicy, PublicSubnetRouteTableAssociation, PublicDefaultRoute]
     Properties:
       ImageId: !Ref LatestAl2023Ami
       InstanceType: !Ref InstanceType
@@ -226,7 +324,7 @@ Resources:
             VolumeType: gp3
             Encrypted: true
             DeleteOnTermination: true
-      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-appliance" }]
+      Tags: [{Key: Name, Value: !Sub "${AWS::StackName}-appliance"}]
       UserData:
         Fn::Base64: !Sub
           - |
@@ -234,7 +332,7 @@ Resources:
             set -euxo pipefail
             exec > /var/log/gentrail-install.log 2>&1
 
-            dnf install -y git tar gzip aws-cfn-bootstrap || yum install -y git tar gzip aws-cfn-bootstrap
+            dnf install -y git tar gzip awscli-2 aws-cfn-bootstrap
             signal() { /opt/aws/bin/cfn-signal --exit-code "$1" --stack ${AWS::StackName} --resource Node --region ${AWS::Region} || true; }
             # Any failure below signals the stack so it rolls back fast instead of waiting out the timeout.
             trap 'signal 1' ERR
@@ -259,8 +357,8 @@ Resources:
               || k3s kubectl -n kube-system rollout restart deploy/local-path-provisioner
             k3s kubectl -n kube-system rollout status deploy/local-path-provisioner --timeout=300s
 
-            curl -sfL https://get.helm.sh/helm-v3.15.4-linux-amd64.tar.gz | tar -xz -C /tmp
-            install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+            curl -sfL https://get.helm.sh/helm-v3.15.4-linux-arm64.tar.gz | tar -xz -C /tmp
+            install -m 0755 /tmp/linux-arm64/helm /usr/local/bin/helm
 
             # The license is written to a 0600 root-only file (not baked into a script
             # or passed on the helm command line) so it never lands in the world and
@@ -268,6 +366,7 @@ Resources:
             mkdir -p /opt/gentrail
             set +x
             ${LicenseWrite}
+            ${TunnelWrite}
             set -x
 
             # fetch.sh + install.sh are baked once and either run inline below
@@ -283,20 +382,21 @@ Resources:
             SRC=/opt/gentrail/src
             rm -rf "$SRC"
             git clone --depth 1 --branch "${RepoBranch}" "${PublicRepoUrl}" "$SRC"
-            INIT_DIR="$SRC/iac/init"
             k3s kubectl create namespace gentrail --dry-run=client -o yaml | k3s kubectl apply -f -
-            CM_ARGS="--from-file=init-aws.sh=$INIT_DIR/init-aws.sh"
-            for f in "$INIT_DIR"/tables/*.json; do CM_ARGS="$CM_ARGS --from-file=$(basename "$f")=$f"; done
-            k3s kubectl -n gentrail create configmap init-aws $CM_ARGS --dry-run=client -o yaml | k3s kubectl apply -f -
             FETCH
             cat > /opt/gentrail/install.sh <<'INSTALL'
             #!/bin/bash
             set -euo pipefail
             export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
             CHART=/opt/gentrail/src/charts/gentrail
+            TUNNEL_SET=""
+            if [ -s /opt/gentrail/tunnel.token ]; then
+              k3s kubectl -n gentrail create secret generic gentrail-cloudflared --from-file=token=/opt/gentrail/tunnel.token --dry-run=client -o yaml | k3s kubectl apply -f -
+              TUNNEL_SET="--set cloudflared.enabled=true --set cloudflared.replicaCount=1"
+            fi
             LICENSE_SET=""
             if [ -f /opt/gentrail/license.jwt ]; then LICENSE_SET="--set-file license.jwt=/opt/gentrail/license.jwt"; fi
-            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-appliance.yaml" --set createNamespace=false --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set dashboard.useInstanceProfile=true $LICENSE_SET --wait --timeout 15m
+            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set dashboard.useInstanceProfile=true $LICENSE_SET $TUNNEL_SET --wait --timeout 15m
             INSTALL
             chmod 600 /opt/gentrail/fetch.sh /opt/gentrail/install.sh
 
@@ -313,6 +413,10 @@ Resources:
             echo "gentrail appliance bootstrap complete (SelfInstall=${SelfInstall})"
           - PiiTokenizationKeyArn: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
             PiiTokenizationKeyRegion: !If [CreatePiiTokenizationKey, !Ref 'AWS::Region', !Select [3, !Split [':', !Ref ExistingPiiTokenizationKeyArn]]]
+            TunnelWrite: !If
+              - HasTunnel
+              - !Sub '( umask 077; TOKEN=$(aws secretsmanager get-secret-value --region "${AWS::Region}" --secret-id "${TunnelSecret}" --query SecretString --output text); printf "%s" "$TOKEN" > /opt/gentrail/tunnel.token )'
+              - "true"
             LicenseWrite: !If
               - HasLicense
               - !Sub '( umask 077; printf "%s" "${LicenseJwt}" > /opt/gentrail/license.jwt )'
@@ -321,7 +425,6 @@ Resources:
       ResourceSignal:
         Timeout: PT20M
         Count: 1
-
 Outputs:
   PiiTokenizationKeyArn:
     Value: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
@@ -329,8 +432,14 @@ Outputs:
     Description: Appliance node instance id (gentrail connect / teardown reach it over SSM).
     Value: !Ref Node
   Tier:
-    Description: Marks this stack as the evaluation appliance tier.
-    Value: eval
+    Description: Standard single-node installation profile.
+    Value: standard
   ConnectHint:
     Description: How to reach the dashboard.
     Value: "Run gentrail connect: it SSM-tunnels the dashboard to http://localhost:8001"
+  RdsInstanceId:
+    Value: !Ref RdsInstance
+  EvidenceBucketName:
+    Value: !Ref EvidenceBucket
+  TraceArchiveBucketName:
+    Value: !Ref TraceArchiveBucket

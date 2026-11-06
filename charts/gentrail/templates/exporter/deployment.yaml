@@ -38,11 +38,7 @@ spec:
               value: {{ .Values.aws.region | quote }}
             - name: EXPORT_TARGET
               value: {{ .Values.exporter.target | quote }}
-            - name: DYNAMO_TRACES_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-traces{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_AGENT_STATS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-agent-stats{{ .Values.ddb.tableSuffix }}"
-{{- include "gentrail.localEnv" . | nindent 12 }}
+{{ include "gentrail.traceStorageEnv" . | indent 12 }}
             {{- if and .Values.irsa.exporter (eq .Values.mode "k3s") }}
 {{- include "gentrail.irsaEnv" .Values.irsa.exporter | nindent 12 }}
             {{- end }}

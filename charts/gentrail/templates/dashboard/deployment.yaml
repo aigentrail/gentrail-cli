@@ -47,20 +47,8 @@ spec:
             - name: GENTRAIL_PII_KMS_REGION
               value: {{ .Values.dashboard.piiKmsRegion | default (index (splitList ":" .Values.dashboard.piiKmsKeyArn) 3) | quote }}
             {{- end }}
-            - name: DYNAMO_TRACES_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-traces{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_VIOLATIONS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-violations{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_AGENT_STATS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-agent-stats{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_POLICY_RULES_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-policy-rules{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_API_KEYS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-api-keys{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_WINDOW_MARKERS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-window-markers{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_HEARTBEATS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-heartbeats{{ .Values.ddb.tableSuffix }}"
+{{ include "gentrail.ruleStorageEnv" . | indent 12 }}
+{{ include "gentrail.traceStorageEnv" . | indent 12 }}
             - name: EVIDENCE_BUCKET
               value: {{ .Values.s3.evidenceBucket | quote }}
             - name: EVIDENCE_BUCKET_REGION
@@ -104,6 +92,10 @@ spec:
                 secretKeyRef:
                   name: gentrail-rds-secret
                   key: dsn
+{{- if .Values.headless.routeApplications }}
+            - name: APPLICATION_API_URL
+              value: "http://headless:8080"
+{{- end }}
 {{- include "gentrail.licenseEnv" . | nindent 12 }}
             - name: LICENSE_SECRET_NAME
               value: {{ .Values.license.secretRef | quote }}
@@ -128,12 +120,6 @@ spec:
             {{- if .Values.dashboard.allowFraming }}
             - name: DASHBOARD_ALLOW_FRAMING
               value: "true"
-            {{- end }}
-            {{- if and .Values.dashboard.useInstanceProfile .Values.ddb.endpoint }}
-            - name: AWS_ENDPOINT_URL_DYNAMODB
-              value: {{ .Values.ddb.endpoint | quote }}
-            {{- else }}
-{{- include "gentrail.localEnv" . | nindent 12 }}
             {{- end }}
             {{- if and .Values.irsa.dashboard (eq .Values.mode "k3s") }}
 {{- include "gentrail.irsaEnv" .Values.irsa.dashboard | nindent 12 }}

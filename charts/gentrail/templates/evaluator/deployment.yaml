@@ -31,27 +31,16 @@ spec:
             - name: health
               containerPort: 8080
           env:
-            - name: AWS_REGION
-              value: {{ .Values.aws.region | quote }}
             - name: EVENT_BUS
               value: nats
             - name: NATS_URL
               value: "nats://nats:4222"
             - name: NATS_STREAM_REPLICAS
               value: {{ .Values.nats.replicas | quote }}
-            - name: DYNAMO_TRACES_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-traces{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_VIOLATIONS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-violations{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_POLICY_RULES_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-policy-rules{{ .Values.ddb.tableSuffix }}"
-            - name: DYNAMO_WINDOW_MARKERS_TABLE
-              value: "{{ .Values.ddb.tablePrefix }}-window-markers{{ .Values.ddb.tableSuffix }}"
+{{ include "gentrail.ruleStorageEnv" . | indent 12 }}
+{{ include "gentrail.traceStorageEnv" . | indent 12 }}
 {{- include "gentrail.licenseEnv" . | nindent 12 }}
-{{- include "gentrail.localEnv" . | nindent 12 }}
-            {{- if and .Values.irsa.evaluator (eq .Values.mode "k3s") }}
-{{- include "gentrail.irsaEnv" .Values.irsa.evaluator | nindent 12 }}
-            {{- end }}
+
           resources: {{- toYaml .Values.evaluator.resources | nindent 12 }}
           readinessProbe:
             httpGet: { path: /healthz, port: health }
@@ -63,13 +52,9 @@ spec:
             periodSeconds: 30
           volumeMounts:
 {{- include "gentrail.licenseMount" . | nindent 12 }}
-          {{- if and .Values.irsa.evaluator (eq .Values.mode "k3s") }}
-{{- include "gentrail.irsaTokenMount" . | nindent 12 }}
-          {{- end }}
+
       volumes:
 {{- include "gentrail.licenseVolume" . | nindent 8 }}
-          {{- if and .Values.irsa.evaluator (eq .Values.mode "k3s") }}
-{{- include "gentrail.irsaTokenVolume" . | nindent 8 }}
-          {{- end }}
+
 
 {{- end }}

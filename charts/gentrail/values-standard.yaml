@@ -1,0 +1,27 @@
+mode: k3s
+local:
+  enabled: false
+rds:
+  bootstrap: true
+storage:
+  class: ""
+dashboard:
+  replicaCount: 1
+  useInstanceProfile: true
+  selfHosted: true
+policyEngine:
+  enabled: false
+nats:
+  replicas: 1
+  storage: persistent
+  jetstreamSize: 5Gi
+docsServer:
+  enabled: false
+sidecar:
+  enabled: false
+agentChat:
+  enabled: false
+marketingConsole:
+  enabled: false
+metabaseSync:
+  enabled: false

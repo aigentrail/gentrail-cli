@@ -22,7 +22,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* Image reference. */}}
 {{- define "gentrail.image" -}}
+{{- $reference := index (.Values.image.references | default dict) .component -}}
+{{- if $reference -}}
+{{- if not (regexMatch "^[^@[:space:]]+@sha256:[a-f0-9]{64}$" $reference) -}}
+{{- fail "component image references must include a sha256 digest" -}}
+{{- end -}}
+{{ $reference }}
+{{- else -}}
 {{ .Values.image.registry }}/{{ .component }}:{{ .Values.image.tag }}
+{{- end -}}
 {{- end -}}
 
 {{/* Pull-secret block (only emits imagePullSecrets if non-empty). */}}
@@ -31,19 +39,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 imagePullSecrets:
   - name: {{ .Values.image.pullSecret }}
 {{- end -}}
-{{- end -}}
-
-{{/* Local-mode env: point at in-cluster DynamoDB-local with dummy creds. Empty
-     ddb.endpoint (prod) emits nothing, so the services use real DDB via IRSA. */}}
-{{- define "gentrail.localEnv" -}}
-{{- if .Values.ddb.endpoint }}
-- name: AWS_ENDPOINT_URL_DYNAMODB
-  value: {{ .Values.ddb.endpoint | quote }}
-- name: AWS_ACCESS_KEY_ID
-  value: "local"
-- name: AWS_SECRET_ACCESS_KEY
-  value: "local"
-{{- end }}
 {{- end -}}
 
 {{/* IRSA without the pod-identity webhook: a projected SA token (audience
@@ -89,4 +84,20 @@ imagePullSecrets:
 - name: license
   secret:
     secretName: {{ .Values.license.secretRef }}
+{{- end }}
+
+{{- define "gentrail.ruleStorageEnv" -}}
+- name: RULES_DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: gentrail-rds-secret
+      key: dsn
+{{- end }}
+
+{{- define "gentrail.traceStorageEnv" -}}
+- name: TRACES_DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: gentrail-rds-secret
+      key: dsn
 {{- end }}

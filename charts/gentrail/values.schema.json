@@ -1,16 +1,82 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["mode", "aws", "image", "ingress", "ddb", "s3", "rds", "llm", "irsa", "license"],
+  "required": ["mode", "aws", "image", "ingress", "s3", "rds", "llm", "irsa", "license"],
   "properties": {
+    "headless": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "modules",
+        "replicaCount",
+        "databaseSecretName",
+        "databaseSecretKey",
+        "rulesDatabaseSecretName",
+        "rulesDatabaseSecretKey",
+        "resources"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "routeApplications": {
+          "type": "boolean"
+        },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "modules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "rules",
+              "policy",
+              "policy-groups",
+              "findings",
+              "approvals",
+              "decisions",
+              "observations"
+            ]
+          }
+        },
+        "resources": {
+          "type": "object"
+        },
+        "databaseSecretName": {
+          "$ref": "#/definitions/resourceName"
+        },
+        "rulesDatabaseSecretName": {
+          "$ref": "#/definitions/resourceName"
+        },
+        "tracesDatabaseSecretName": { "$ref": "#/definitions/resourceName" },
+        "tracesDatabaseSecretKey": { "type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-zA-Z0-9._-]+$" },
+        "databaseSecretKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-zA-Z0-9._-]+$"
+        },
+        "rulesDatabaseSecretKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-zA-Z0-9._-]+$"
+        }
+      }
+    },
     "dashboard": { "type": "object", "properties": { "companySignIn": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/companySignIn" }] }, "piiKmsKeyArn": { "type": "string", "pattern": "^$|^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$" }, "piiKmsRegion": { "type": "string" }, "useInstanceProfile": { "type": "boolean" } } },
     "mode":    { "type": "string", "enum": ["k3s", "eks"] },
     "aws":     { "type": "object", "required": ["region"], "properties": { "region": { "type": "string" } } },
     "image":   { "type": "object", "required": ["registry", "tag"], "properties": { "registry": { "type": "string" }, "tag": { "type": "string" }, "pullPolicy": { "type": "string" }, "pullSecret": { "type": "string" } } },
     "ingress": { "type": "object", "properties": { "targetGroups": { "type": "object", "properties": { "dashboardArn": { "type": "string" }, "otelArn": { "type": "string" } } } } },
-    "ddb":     { "type": "object", "required": ["tablePrefix"], "properties": { "tablePrefix": { "type": "string" } } },
     "s3":      { "type": "object", "required": ["evidenceBucket"], "properties": { "evidenceBucket": { "type": "string" }, "traceArchiveBucket": { "type": "string" } } },
-    "rds":     { "type": "object", "required": ["secretArn"], "properties": { "endpoint": { "type": "string" }, "instanceId": { "type": "string" }, "secretArn": { "type": "string" } } },
+    "rds":     { "type": "object", "required": ["secretArn"], "properties": { "bootstrap": { "type": "boolean" }, "endpoint": { "type": "string" }, "instanceId": { "type": "string" }, "secretArn": { "type": "string" } } },
     "llm":     { "type": "object", "required": ["provider", "model"], "properties": { "provider": { "type": "string", "enum": ["bedrock", "openai"] }, "model": { "type": "string" } } },
     "irsa":    { "type": "object", "required": ["dashboard", "policyEngine", "rdsBootstrap"], "properties": { "dashboard": { "type": "string" }, "policyEngine": { "type": "string" }, "rdsBootstrap": { "type": "string" } } },
     "license": { "type": "object", "required": ["secretRef"], "properties": { "secretRef": { "type": "string" } } }

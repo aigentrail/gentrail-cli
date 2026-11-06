@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Gentrail M3 BYOC substrate — VPC, EKS, RDS, S3, KMS, DDB, IRSA, ACM.
+  Gentrail M3 BYOC substrate — VPC, EKS, RDS, S3, KMS, IRSA, ACM.
   Single template per SP2 spec decision. Resources currently empty;
   filled in incrementally across SP2 tasks 3–11.
 
@@ -30,15 +30,6 @@ Metadata:
           - ExistingPiiTokenizationKeyArn
           - KmsKeyAlias
           - S3ObjectLockRetentionDays
-      - Label: { default: "DynamoDB" }
-        Parameters:
-          - DdbBillingMode
-          - DdbEnablePointInTimeRecovery
-          - DdbTableNamePrefix
-      - Label: { default: "Trace archiving" }
-        Parameters:
-          - ArchiverCodeS3Bucket
-          - ArchiverCodeS3Key
       - Label: { default: "Trace export" }
         Parameters:
           - ExportBucketName
@@ -152,33 +143,6 @@ Parameters:
     MaxValue: 36500
 
   # ── DynamoDB ───────────────────────────────────────────────────────────
-  DdbBillingMode:
-    Type: String
-    AllowedValues: [ "PAY_PER_REQUEST", "PROVISIONED" ]
-    Default: "PAY_PER_REQUEST"
-  DdbEnablePointInTimeRecovery:
-    Type: String
-    AllowedValues: [ "true", "false" ]
-    Default: "true"
-  DdbTableNamePrefix:
-    Type: String
-    Default: gentrail
-    AllowedPattern: "^[a-z][a-z0-9-]{0,30}$"
-
-  # ── Trace archiving ────────────────────────────────────────────────────
-  ArchiverCodeS3Bucket:
-    Type: String
-    MinLength: 1
-    Description: >
-      S3 bucket in this stack's region holding the trace-archiver Lambda zip.
-      install.sh stages the bundled archiver.zip there before create-stack. The
-      archiver copies TTL-expired traces to the trace-archive bucket (GLACIER
-      tiering), matching Gentrail cloud's retention behavior.
-  ArchiverCodeS3Key:
-    Type: String
-    Default: "gentrail/archiver.zip"
-
-  # ── In-cluster bootstrap ───────────────────────────────────────────────
   LatestAl2023Ami:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -297,17 +261,17 @@ Parameters:
     Description: Key prefix the export writes under, without leading or trailing slashes.
   BedrockModelId:
     Type: String
-    Default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    Default: "us.openai.gpt-6.1-terra"
     Description: >
-      Bedrock model the policy engine invokes. Claude 4 is reachable only via a
-      cross-region inference profile (the us./eu./apac. prefix), which is what
-      this default is. A CustomResource checks it at stack-create and WARNS
+      Bedrock model the policy engine invokes. GPT-6.1 Terra uses the US
+      cross-region inference profile by default. A CustomResource checks it at
+      stack-create and WARNS
       (advisory, non-blocking) if it is not yet enabled in this account/region.
       Enable model access before using the policy engine.
 
   BedrockFoundationModelId:
     Type: String
-    Default: "anthropic.claude-sonnet-4-5-20250929-v1:0"
+    Default: "openai.gpt-6.1-terra"
     Description: >
       The foundation model behind BedrockModelId (strip the region prefix). Used
       only to scope the policy engine's bedrock:InvokeModel IAM to the models the
@@ -722,18 +686,6 @@ Resources:
         - !Ref PrivateRouteTable0
         - !Ref PrivateRouteTable1
         - !If [ ThreeOrMoreAzs, !Ref PrivateRouteTable2, !Ref AWS::NoValue ]
-  DdbGatewayEndpoint:
-    Condition: EnableVpcEndpointsCond
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcId: !Ref Vpc
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
-      VpcEndpointType: Gateway
-      RouteTableIds:
-        - !Ref PrivateRouteTable0
-        - !Ref PrivateRouteTable1
-        - !If [ ThreeOrMoreAzs, !Ref PrivateRouteTable2, !Ref AWS::NoValue ]
-
   EndpointSecurityGroup:
     Condition: EnableVpcEndpointsCond
     Type: AWS::EC2::SecurityGroup
@@ -838,367 +790,6 @@ Resources:
       KmsKeyId: !If [ CreateKmsKey, !GetAtt SubstrateKmsKey.Arn, !Ref ExistingKmsKeyArn ]
       Tags:
         - { Key: gentrail:role, Value: rds-master }
-
-  # >>> GENERATED ddb-tables (source iac/ddb.cue, regen scripts/gen-cfn.sh; do not hand-edit)
-  TracesTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      GlobalSecondaryIndexes:
-        - IndexName: agent-index
-          KeySchema:
-            - AttributeName: GSI1PK
-              KeyType: HASH
-            - AttributeName: SK
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
-        - IndexName: org-receipt-index
-          KeySchema:
-            - AttributeName: PK
-              KeyType: HASH
-            - AttributeName: received_at
-              KeyType: RANGE
-          Projection:
-            ProjectionType: INCLUDE
-            NonKeyAttributes:
-              - trace_id
-              - agent_id
-              - total_tokens
-              - evidence_kind
-              - item_type
-      TimeToLiveSpecification:
-        AttributeName: ttl
-        Enabled: true
-      StreamSpecification:
-        StreamViewType: OLD_IMAGE
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId:
-          Fn::If:
-            - CreateKmsKey
-            - Fn::GetAtt:
-                - SubstrateKmsKey
-                - Arn
-            - Ref: ExistingKmsKeyArn
-      TableName:
-        Fn::Sub: ${DdbTableNamePrefix}-traces
-      BillingMode:
-        Ref: DdbBillingMode
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-        - AttributeName: GSI1PK
-          AttributeType: S
-        - AttributeName: received_at
-          AttributeType: "N"
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled:
-          Ref: DdbEnablePointInTimeRecovery
-      Tags:
-        - Key: gentrail:table
-          Value: traces
-  HeartbeatsTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId:
-          Fn::If:
-            - CreateKmsKey
-            - Fn::GetAtt:
-                - SubstrateKmsKey
-                - Arn
-            - Ref: ExistingKmsKeyArn
-      TableName:
-        Fn::Sub: ${DdbTableNamePrefix}-heartbeats
-      BillingMode:
-        Ref: DdbBillingMode
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled:
-          Ref: DdbEnablePointInTimeRecovery
-      Tags:
-        - Key: gentrail:table
-          Value: heartbeats
-  AgentStatsTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      GlobalSecondaryIndexes:
-        - IndexName: org-index
-          KeySchema:
-            - AttributeName: org_id
-              KeyType: HASH
-          Projection:
-            ProjectionType: ALL
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId:
-          Fn::If:
-            - CreateKmsKey
-            - Fn::GetAtt:
-                - SubstrateKmsKey
-                - Arn
-            - Ref: ExistingKmsKeyArn
-      TableName:
-        Fn::Sub: ${DdbTableNamePrefix}-agent-stats
-      BillingMode:
-        Ref: DdbBillingMode
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: org_id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled:
-          Ref: DdbEnablePointInTimeRecovery
-      Tags:
-        - Key: gentrail:table
-          Value: agent-stats
-  ApiKeysTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId:
-          Fn::If:
-            - CreateKmsKey
-            - Fn::GetAtt:
-                - SubstrateKmsKey
-                - Arn
-            - Ref: ExistingKmsKeyArn
-      TableName:
-        Fn::Sub: ${DdbTableNamePrefix}-api-keys
-      BillingMode:
-        Ref: DdbBillingMode
-      AttributeDefinitions:
-        - AttributeName: token
-          AttributeType: S
-      KeySchema:
-        - AttributeName: token
-          KeyType: HASH
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled:
-          Ref: DdbEnablePointInTimeRecovery
-      Tags:
-        - Key: gentrail:table
-          Value: api-keys
-  ViolationsTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      GlobalSecondaryIndexes:
-        - IndexName: org-recent-index
-          KeySchema:
-            - AttributeName: GSI1PK
-              KeyType: HASH
-            - AttributeName: GSI1SK
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
-        - IndexName: org-created-index
-          KeySchema:
-            - AttributeName: GSI1PK
-              KeyType: HASH
-            - AttributeName: created_at
-              KeyType: RANGE
-          Projection:
-            ProjectionType: INCLUDE
-            NonKeyAttributes:
-              - violation_id
-              - org_id
-              - rule_id
-              - rule_name
-              - action
-              - reason
-              - event_type
-              - source_id
-              - source_type
-              - outcome
-              - agent_id
-              - agent_name
-              - trace_received_at
-              - triage_status
-              - triage_notes
-              - triaged_by
-              - triaged_at
-        - IndexName: rule-index
-          KeySchema:
-            - AttributeName: GSI2PK
-              KeyType: HASH
-            - AttributeName: GSI2SK
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
-        - IndexName: source-index
-          KeySchema:
-            - AttributeName: GSI3PK
-              KeyType: HASH
-            - AttributeName: GSI3SK
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
-      TimeToLiveSpecification:
-        AttributeName: quota_expires_at
-        Enabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId:
-          Fn::If:
-            - CreateKmsKey
-            - Fn::GetAtt:
-                - SubstrateKmsKey
-                - Arn
-            - Ref: ExistingKmsKeyArn
-      TableName:
-        Fn::Sub: ${DdbTableNamePrefix}-violations
-      BillingMode:
-        Ref: DdbBillingMode
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-        - AttributeName: GSI1PK
-          AttributeType: S
-        - AttributeName: GSI1SK
-          AttributeType: S
-        - AttributeName: GSI2PK
-          AttributeType: S
-        - AttributeName: GSI2SK
-          AttributeType: S
-        - AttributeName: GSI3PK
-          AttributeType: S
-        - AttributeName: GSI3SK
-          AttributeType: S
-        - AttributeName: created_at
-          AttributeType: "N"
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled:
-          Ref: DdbEnablePointInTimeRecovery
-      Tags:
-        - Key: gentrail:table
-          Value: violations
-  PolicyRulesTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      GlobalSecondaryIndexes:
-        - IndexName: enabled-index
-          KeySchema:
-            - AttributeName: enabled_flag
-              KeyType: HASH
-          Projection:
-            ProjectionType: KEYS_ONLY
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId:
-          Fn::If:
-            - CreateKmsKey
-            - Fn::GetAtt:
-                - SubstrateKmsKey
-                - Arn
-            - Ref: ExistingKmsKeyArn
-      TableName:
-        Fn::Sub: ${DdbTableNamePrefix}-policy-rules
-      BillingMode:
-        Ref: DdbBillingMode
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-        - AttributeName: enabled_flag
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled:
-          Ref: DdbEnablePointInTimeRecovery
-      Tags:
-        - Key: gentrail:table
-          Value: policy-rules
-  WindowMarkersTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      TimeToLiveSpecification:
-        AttributeName: expires_at
-        Enabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId:
-          Fn::If:
-            - CreateKmsKey
-            - Fn::GetAtt:
-                - SubstrateKmsKey
-                - Arn
-            - Ref: ExistingKmsKeyArn
-      TableName:
-        Fn::Sub: ${DdbTableNamePrefix}-window-markers
-      BillingMode:
-        Ref: DdbBillingMode
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled:
-          Ref: DdbEnablePointInTimeRecovery
-      Tags:
-        - Key: gentrail:table
-          Value: window-markers
-  # <<< GENERATED ddb-tables
 
   # ── S3 buckets ────────────────────────────────────────────────────
   EvidenceBucket:
@@ -1630,30 +1221,6 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: DdbReadWrite
-                Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:BatchGetItem
-                  - dynamodb:BatchWriteItem
-                  - dynamodb:ConditionCheckItem
-                Resource:
-                  - !GetAtt TracesTable.Arn
-                  - !Sub "${TracesTable.Arn}/index/*"
-                  - !GetAtt ViolationsTable.Arn
-                  - !Sub "${ViolationsTable.Arn}/index/*"
-                  - !GetAtt AgentStatsTable.Arn
-                  - !Sub "${AgentStatsTable.Arn}/index/*"
-                  - !GetAtt PolicyRulesTable.Arn
-                  - !Sub "${PolicyRulesTable.Arn}/index/*"
-                  - !GetAtt ApiKeysTable.Arn
-                  - !GetAtt WindowMarkersTable.Arn
-                  - !GetAtt HeartbeatsTable.Arn
               - Sid: EvidenceS3
                 Effect: Allow
                 Action:
@@ -1673,6 +1240,10 @@ Resources:
                 Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub "${TraceArchiveBucket.Arn}/*"
+              - Sid: TraceArchiveWrite
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${TraceArchiveBucket.Arn}/*/evidence/*"
               - Sid: TraceArchiveList
                 Effect: Allow
                 Action: s3:ListBucket
@@ -1694,15 +1265,12 @@ Resources:
                 Effect: Allow
                 Action: sts:AssumeRole
                 Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/gentrail-readonly-${AWS::Region}"
-              # The dashboard's tool classifier invokes Amazon Nova (a first-party
-              # model, so no per-account model-access grant is needed) on the
-              # cross-region inference profile and the foundation model behind it.
               - Sid: BedrockClassify
                 Effect: Allow
                 Action: bedrock:InvokeModel
                 Resource:
-                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.amazon.nova-lite-v1:0"
-                  - "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0"
+                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.openai.gpt-6.1-terra"
+                  - "arn:aws:bedrock:*::foundation-model/openai.gpt-6.1-terra"
       Tags:
         - { Key: gentrail:service-account, Value: dashboard }
 
@@ -2092,60 +1660,6 @@ Resources:
         - { Key: gentrail:service-account, Value: rds-secret-bootstrap }
 
   # ── Evaluator IRSA role (k8s consumer, replaces the evaluator Lambda) ──
-  EvaluatorIrsaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument: !Sub
-        - |
-          {
-            "Version": "2012-10-17",
-            "Statement": [{
-              "Effect": "Allow",
-              "Principal": { "Federated": "${OidcArn}" },
-              "Action": "sts:AssumeRoleWithWebIdentity",
-              "Condition": {
-                "StringEquals": {
-                  "${OidcUrl}:sub": "system:serviceaccount:gentrail:evaluator",
-                  "${OidcUrl}:aud": "sts.amazonaws.com"
-                }
-              }
-            }]
-          }
-        - OidcArn: !GetAtt EksOidcProvider.Arn
-          OidcUrl: !Select [1, !Split ["//", !GetAtt EksCluster.OpenIdConnectIssuerUrl]]
-      Policies:
-        - PolicyName: evaluator-data-access
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Sid: DdbReadWrite
-                Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:BatchGetItem
-                Resource:
-                  - !GetAtt TracesTable.Arn
-                  - !Sub "${TracesTable.Arn}/index/*"
-                  - !GetAtt ViolationsTable.Arn
-                  - !Sub "${ViolationsTable.Arn}/index/*"
-                  - !GetAtt PolicyRulesTable.Arn
-                  - !Sub "${PolicyRulesTable.Arn}/index/*"
-                  - !GetAtt WindowMarkersTable.Arn
-              - Sid: KmsDecrypt
-                Effect: Allow
-                Action: kms:Decrypt
-                Resource: !If [ CreateKmsKey, !GetAtt SubstrateKmsKey.Arn, !Ref ExistingKmsKeyArn ]
-      Tags:
-        - { Key: gentrail:service-account, Value: evaluator }
-
-  # Exporter IRSA role: always created so the bootstrap can name it
-  # unconditionally; without an export bucket it can only read the two tables
-  # and no pod runs as its service account.
   ExporterIrsaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -2172,16 +1686,6 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: DdbReadAndCursor
-                Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                  - dynamodb:UpdateItem
-                Resource:
-                  - !GetAtt TracesTable.Arn
-                  - !GetAtt AgentStatsTable.Arn
               - Sid: KmsDecrypt
                 Effect: Allow
                 Action: kms:Decrypt
@@ -2196,135 +1700,11 @@ Resources:
       Tags:
         - { Key: gentrail:service-account, Value: exporter }
 
-  # ── Authproxy IRSA role (k8s ingest, replaces the authproxy Lambda) ──
-  AuthproxyIrsaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument: !Sub
-        - |
-          {
-            "Version": "2012-10-17",
-            "Statement": [{
-              "Effect": "Allow",
-              "Principal": { "Federated": "${OidcArn}" },
-              "Action": "sts:AssumeRoleWithWebIdentity",
-              "Condition": {
-                "StringEquals": {
-                  "${OidcUrl}:sub": "system:serviceaccount:gentrail:authproxy",
-                  "${OidcUrl}:aud": "sts.amazonaws.com"
-                }
-              }
-            }]
-          }
-        - OidcArn: !GetAtt EksOidcProvider.Arn
-          OidcUrl: !Select [1, !Split ["//", !GetAtt EksCluster.OpenIdConnectIssuerUrl]]
-      Policies:
-        - PolicyName: authproxy-data-access
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Sid: DdbReadWrite
-                Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:Query
-                  - dynamodb:UpdateItem
-                  - dynamodb:BatchWriteItem
-                Resource:
-                  - !GetAtt TracesTable.Arn
-                  - !Sub "${TracesTable.Arn}/index/*"
-                  - !GetAtt AgentStatsTable.Arn
-                  - !Sub "${AgentStatsTable.Arn}/index/*"
-                  - !GetAtt ApiKeysTable.Arn
-              - Sid: KmsDecrypt
-                Effect: Allow
-                Action: kms:Decrypt
-                Resource: !If [ CreateKmsKey, !GetAtt SubstrateKmsKey.Arn, !Ref ExistingKmsKeyArn ]
-      Tags:
-        - { Key: gentrail:service-account, Value: authproxy }
-
   # ── ACM cert (conditional) ──────────────────────────────────────
   # Note: the ALB is created by the AWS Load Balancer Controller from the Ingress
   # in the Helm chart - NOT here. For HTTPS, pass ExistingAcmCertArn (a BYO ACM
   # cert); point your own DNS at the ALB post-install (a one-line aws CLI command
   # in the runbook). CFN manages no Route 53 zones, records, or certs.
-
-  # ── Trace archiver (DDB stream → S3, parity with infra/ingestion) ─
-  ArchiverRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${ClusterName}-trace-archiver"
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: dynamodb-streams
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetRecords
-                  - dynamodb:GetShardIterator
-                  - dynamodb:DescribeStream
-                  - dynamodb:ListStreams
-                Resource: !Sub "${TracesTable.Arn}/stream/*"
-        - PolicyName: s3-archive-write
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: s3:PutObject
-                Resource: !Sub "${TraceArchiveBucket.Arn}/*"
-        # Unlike Gentrail cloud (AWS-owned table keys), the substrate tables
-        # and buckets are CMK-encrypted: reading the stream needs Decrypt,
-        # writing SSE-KMS archive objects needs GenerateDataKey.
-        - PolicyName: kms-substrate
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !If [ CreateKmsKey, !GetAtt SubstrateKmsKey.Arn, !Ref ExistingKmsKeyArn ]
-
-  ArchiverFn:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub "${ClusterName}-trace-archiver"
-      Runtime: provided.al2023
-      Architectures: [ arm64 ]
-      Handler: bootstrap
-      MemorySize: 128
-      Timeout: 60
-      Role: !GetAtt ArchiverRole.Arn
-      Code:
-        S3Bucket: !Ref ArchiverCodeS3Bucket
-        S3Key: !Ref ArchiverCodeS3Key
-      Environment:
-        Variables:
-          ARCHIVE_BUCKET: !Ref TraceArchiveBucket
-      Tags:
-        - { Key: gentrail:role, Value: trace-archiver }
-
-  ArchiverStreamMapping:
-    Type: AWS::Lambda::EventSourceMapping
-    Properties:
-      EventSourceArn: !GetAtt TracesTable.StreamArn
-      FunctionName: !GetAtt ArchiverFn.Arn
-      StartingPosition: LATEST
-      BatchSize: 100
-      MaximumBatchingWindowInSeconds: 30
-      FilterCriteria:
-        Filters:
-          - Pattern: '{"eventName":["REMOVE"]}'
 
   # ── Bedrock-model validator ──────────────────────────────────────
   BedrockValidatorRole:
@@ -2565,8 +1945,6 @@ Resources:
               dashboard:
                 piiKmsKeyArn: ${PiiTokenizationKeyArn}
                 piiKmsRegion: ${PiiTokenizationKeyRegion}
-              ddb:
-                tablePrefix: ${DdbTableNamePrefix}
               s3:
                 evidenceBucket: ${EvidenceBucket}
               rds:
@@ -2578,9 +1956,7 @@ Resources:
               irsa:
                 dashboard: ${DashboardIrsaRole.Arn}
                 policyEngine: ${PolicyEngineIrsaRole.Arn}
-                evaluator: ${EvaluatorIrsaRole.Arn}
                 exporter: ${ExporterIrsaRole.Arn}
-                authproxy: ${AuthproxyIrsaRole.Arn}
                 rdsBootstrap: ${RdsBootstrapIrsaRole.Arn}
               license:
                 secretRef: gentrail-license
@@ -2618,7 +1994,7 @@ Outputs:
     Value: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
   Tier:
     Description: Marks this stack as the production (EKS/RDS) substrate tier.
-    Value: prod
+    Value: enterprise
   ClusterName:
     Description: EKS cluster name (used by aws eks update-kubeconfig)
     Value: !Ref EksCluster
@@ -2671,9 +2047,6 @@ Outputs:
     Condition: EnableVpcFlowLogsCond
     Value: !Ref VpcFlowLogsBucket
 
-  DdbTablePrefix:
-    Value: !Ref DdbTableNamePrefix
-
   AcmCertArn:
     Description: ACM cert ARN for the public ALB(s); empty for HTTP (BYO)
     Value: !Ref ExistingAcmCertArn
@@ -2690,8 +2063,6 @@ Outputs:
   # IRSA role ARNs (Helm chart annotations)
   DashboardIrsaRoleArn:    { Value: !GetAtt DashboardIrsaRole.Arn }
   PolicyEngineIrsaRoleArn: { Value: !GetAtt PolicyEngineIrsaRole.Arn }
-  EvaluatorIrsaRoleArn:    { Value: !GetAtt EvaluatorIrsaRole.Arn }
-  AuthproxyIrsaRoleArn:    { Value: !GetAtt AuthproxyIrsaRole.Arn }
   AlbControllerIrsaRoleArn: { Value: !GetAtt AlbControllerIrsaRole.Arn }
   RdsBootstrapIrsaRoleArn: { Value: !GetAtt RdsBootstrapIrsaRole.Arn }
 

@@ -1,6 +1,5 @@
 # Defaults — all CFN-output-derived keys are left empty so a value injected
 # by the installer via -f override wins.
-
 # Deployment substrate. The two targets differ only in how pods get AWS creds and
 # who provisions the RDS secret, so they collapse to one profile rather than a set
 # of independent flags:
@@ -10,66 +9,49 @@
 #     mints the RDS secret via IRSA.
 # Both use IRSA (web-identity tokens), never the node role via IMDS.
 mode: k3s
-
 aws:
   region: ""
-
 # Chart owns the namespace. Set false when the runner pre-creates it (so the
-# license Secret and init-aws ConfigMap can land before install).
+# license Secret can land before install).
 createNamespace: true
-
 image:
   # Public ECR mirror so BYOC clients pull anonymously (no token). The internal
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.12.1
+  tag: v0.13.0
   pullPolicy: IfNotPresent
   pullSecret: ""
-
+  references: {}
 ingress:
   # Set by the production bootstrap from the substrate outputs: CloudFormation
   # owns the load balancers, the chart only binds pods into their target groups.
   targetGroups:
     dashboardArn: ""
     otelArn: ""
-
 # PVC storage class. "" uses the cluster default (k3s local-path); set gp2 on EKS.
 storage:
   class: ""
-
-ddb:
-  tablePrefix: gentrail
-  tableSuffix: "" # appended after the table name, e.g. "-dev" for gentrail-traces-dev
-  endpoint: "" # "" = real AWS DynamoDB via IRSA; set to dynamodb-local for local mode
-
-# Renders in-cluster DynamoDB-local + Postgres + table init so the chart runs
-# end to end without AWS (set ddb.endpoint to dynamodb-local too). Never enable
+# Renders in-cluster Postgres so the chart runs
+# end to end without AWS. Never enable
 # for a cloud install.
 local:
   enabled: false
   # PVC sizes for the on-disk appliance datastores (StatefulSets). Only used when
-  # local.enabled; on a cloud install the real DDB/RDS make these inert.
-  dynamodbSize: 10Gi
+  # local.enabled; on a cloud install the managed SQL make these inert.
   postgresSize: 10Gi
-  tablesDir: "" # where init-aws.sh finds table specs; "" = /init (the flat ConfigMap mount)
-
 # Default-deny + per-component allows. Disable for local clusters whose CNI
 # enforces policies but where the prod 443/IRSA egress shape does not apply.
 networkPolicies:
   enabled: true
-
 s3:
   evidenceBucket: ""
   traceArchiveBucket: ""
-
 rds:
-  endpoint: ""   # host:port; or leave empty and set instanceId so the pre-install job discovers it once RDS is available
+  bootstrap: false
+  endpoint: "" # host:port; or leave empty and set instanceId so the pre-install job discovers it once RDS is available
   instanceId: ""
   secretArn: ""
-  # The pre-install Job that mints gentrail-rds-secret runs only on eks (see
-  # mode); on k3s OpenTofu creates the secret, and local mode supplies it.
-
 # In-cluster Cloudflare Tunnel ingress (k3s): cloudflared connects out to
 # Cloudflare and routes the configured hostnames to the in-cluster Services.
 # Run >1 replica for edge HA. The tunnel's ingress rules are managed remotely.
@@ -78,32 +60,40 @@ cloudflared:
   replicaCount: 2
   image: cloudflare/cloudflared:2024.10.0
   tokenSecretRef: gentrail-cloudflared
-
 llm:
   provider: bedrock
-  model: ""
-
+  model: "us.openai.gpt-6.1-terra"
 irsa:
   dashboard: ""
   policyEngine: ""
   rdsBootstrap: ""
-  evaluator: ""
   exporter: ""
-  authproxy: ""
   docsServer: ""
   agentChat: ""
   marketingConsole: ""
-
 license:
   secretRef: gentrail-license
   # Optional bootstrap JWT. When set, the pre-install hook seeds the license
   # secret once at install (hosted passes its Secrets Manager value here); when
   # empty the secret is created empty for the in-product upload to populate.
   jwt: ""
-
-
+headless:
+  enabled: false
+  routeApplications: false
+  replicaCount: 1
+  modules: [rules, policy, policy-groups, findings, approvals]
+  databaseSecretName: gentrail-rds-secret
+  databaseSecretKey: dsn
+  rulesDatabaseSecretName: gentrail-rds-secret
+  rulesDatabaseSecretKey: dsn
+  tracesDatabaseSecretName: gentrail-rds-secret
+  tracesDatabaseSecretKey: dsn
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
 dashboard:
   enabled: true
+  preflight: false
   companySignIn: null
   piiKmsKeyArn: ""
   piiKmsRegion: ""
@@ -132,17 +122,16 @@ dashboard:
   # existing sessions survive a hostname cutover). Unset falls back to a
   # host-only cookie signed with the built-in "dev" secret.
   cookieDomain: ""
-  sessionSecretName: ""   # k8s secret holding key "session-secret"
+  sessionSecretName: "" # k8s secret holding key "session-secret"
   # /admin/orgs tenant lifecycle; the routes register only when this token is set.
-  adminTokenSecretName: ""   # k8s secret holding key "admin-token"
+  adminTokenSecretName: "" # k8s secret holding key "admin-token"
   # Relax X-Frame-Options from DENY to SAMEORIGIN so the marketing demo can embed
   # the dashboard in an iframe it proxies under the same origin. Demo stage only;
   # production leaves it false (unframeable).
   allowFraming: false
   resources:
-    requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 500m, memory: 512Mi }
-
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
 # policy-engine now speaks Bedrock (llm.provider/llm.model below; IRSA grants
 # bedrock:InvokeModel). Enable it by setting replicaCount: 1 once the configured
 # model is granted access in the account/region - the substrate's validator
@@ -153,9 +142,8 @@ policyEngine:
   enabled: true
   replicaCount: 0
   resources:
-    requests: { cpu: 200m, memory: 256Mi }
-    limits:   { cpu: 1000m, memory: 1Gi }
-
+    requests: {cpu: 200m, memory: 256Mi}
+    limits: {cpu: 1000m, memory: 1Gi}
 # replicas sets both the NATS cluster size and the EVENTS stream replica factor.
 # 1 for a single-node env, 3 for the HA BYOC cluster.
 nats:
@@ -163,31 +151,27 @@ nats:
   storage: ephemeral
   jetstreamSize: 5Gi
   resources:
-    requests: { cpu: 100m, memory: 128Mi }
-    limits:   { cpu: 500m, memory: 512Mi }
-
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
 evaluator:
   enabled: true
   replicaCount: 1
   resources:
-    requests: { cpu: 100m, memory: 128Mi }
-    limits:   { cpu: 500m, memory: 350Mi }
-
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 350Mi}
 # The export sink (docs/architecture/export-sinks.md): an s3:// or file:// target
 # turns it on; empty (the default) renders nothing.
 exporter:
   target: ""
   resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits:   { cpu: 500m, memory: 512Mi }
-
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
 authproxy:
   enabled: true
   replicaCount: 1
   resources:
-    requests: { cpu: 100m, memory: 128Mi }
-    limits:   { cpu: 500m, memory: 350Mi }
-
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 350Mi}
 demoWorkload:
   enabled: false
   paused: false
@@ -197,7 +181,6 @@ demoWorkload:
   resources:
     requests: {cpu: 10m, memory: 32Mi}
     limits: {cpu: 100m, memory: 128Mi}
-
 # The interactive-demo sidecar (gentrail.ai/demo): leases per-visitor pool orgs
 # and replays a case's recorded trace cassette through ingestion. Demo stage only
 # (enabled false everywhere else). Cassettes are baked into the image at /cases.
@@ -207,11 +190,10 @@ sidecar:
   enabled: false
   replicaCount: 1
   buffer: 3
-  adminTokenSecretName: ""   # k8s secret holding key "admin-token" (reuse the dashboard's)
+  adminTokenSecretName: "" # k8s secret holding key "admin-token" (reuse the dashboard's)
   resources:
-    requests: { cpu: 50m, memory: 64Mi }
-    limits:   { cpu: 250m, memory: 256Mi }
-
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 250m, memory: 256Mi}
 # docs-server (the internal wiki). Our-cloud-only: enabled false so a BYOC install
 # never renders it (like cloudflared/local). infra/k3s-apps enables it, supplies
 # the binaries bucket, and routes the wiki hostname to it on the k3s tunnel.
@@ -225,15 +207,15 @@ docsServer:
   docsTarballKey: "intranet-docs/docs.tar.gz"
   authenticationSecretName: "gentrail-wiki-authentication"
   resources:
-    requests: { cpu: 50m, memory: 64Mi }
-    limits:   { cpu: 250m, memory: 150Mi }
-
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 250m, memory: 150Mi}
 # agent-chat (the live governance demo UI). Our-cloud-only: enabled false so a
 # BYOC install never renders it. dashApi/ingest are in-cluster; dashPublic is
 # only for browser links. cookieDomain empty inherits dashboard.cookieDomain so
 # it reads the shared gentrail_session cookie.
 agentChat:
   enabled: false
+  apiKeySecretName: agent-chat-api-key
   org: "northwind"
   dashApi: "http://dashboard:8001"
   ingest: "http://authproxy:4318"
@@ -241,9 +223,8 @@ agentChat:
   cookieDomain: ""
   port: 8080
   resources:
-    requests: { cpu: 25m, memory: 64Mi }
-    limits:   { cpu: 250m, memory: 200Mi }
-
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 250m, memory: 200Mi}
 marketingConsole:
   enabled: false
   gatewayUrl: ""
@@ -255,9 +236,8 @@ marketingConsole:
   authenticationSecretName: gentrail-marketing-authentication
   port: 8085
   resources:
-    requests: { cpu: 25m, memory: 64Mi }
-    limits:   { cpu: 250m, memory: 150Mi }
-
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 250m, memory: 150Mi}
 # Metabase (the internal analytics portal). Our-cloud-only: enabled false so a
 # BYOC install never renders it (like docsServer/cloudflared). infra/k3s-apps
 # enables it, creates the app-DB connection secret it references, routes
@@ -287,8 +267,8 @@ metabase:
   # so it schedules onto a node with headroom; cap at 2Gi to bound the heap
   # (matches the watch-item in the deploy spec).
   resources:
-    requests: { cpu: 250m, memory: 512Mi }
-    limits:   { cpu: 1000m, memory: 2Gi }
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: 1000m, memory: 2Gi}
   # The board-sync hook Job reconciles the committed dashboards/*.sql into
   # Metabase as native questions on every chart apply.
   # The metrics datasource + the api-key SSM parameter must already exist.
@@ -301,5 +281,5 @@ metabase:
     metricsDbName: Gentrail metrics
     collection: Analytics
     resources:
-      requests: { cpu: 50m, memory: 64Mi }
-      limits:   { cpu: 250m, memory: 256Mi }
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {cpu: 250m, memory: 256Mi}

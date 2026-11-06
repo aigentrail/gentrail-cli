@@ -34,6 +34,11 @@ spec:
             - name: http
               containerPort: {{ .Values.agentChat.port }}
           env:
+            - name: GENTRAIL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "agentChat.apiKeySecretName is required" .Values.agentChat.apiKeySecretName | quote }}
+                  key: api-key
             - name: CHAT_PORT
               value: {{ .Values.agentChat.port | quote }}
             - name: ORG

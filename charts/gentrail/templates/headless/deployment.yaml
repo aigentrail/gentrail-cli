@@ -1,0 +1,106 @@
+{{- if .Values.headless.routeApplications }}
+{{- if not .Values.headless.enabled }}
+{{- fail "routing application APIs requires headless.enabled" }}
+{{- end }}
+{{- range $required := list "rules" "policy" "policy-groups" "findings" "approvals" }}
+{{- if not (has $required $.Values.headless.modules) }}
+{{- fail "dashboard application routing requires rules, policy, policy-groups, findings and approvals" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.headless.enabled }}
+{{- if not (index (.Values.image.references | default dict) "headless") }}
+{{- fail "enabled headless requires image.references.headless pinned to a digest" }}
+{{- end }}
+{{- if or (has "policy" .Values.headless.modules) (has "policy-groups" .Values.headless.modules) }}
+{{- if not (has "rules" .Values.headless.modules) }}
+{{- fail "headless policy and policy-groups require rules" }}
+{{- end }}
+{{- end }}
+{{- if has "decisions" .Values.headless.modules }}
+{{- if or (not (has "rules" .Values.headless.modules)) (not (has "approvals" .Values.headless.modules)) }}
+{{- fail "headless decisions require rules and approvals" }}
+{{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "gentrail.labels" (merge (dict "component" "headless") .) | indent 4 }}
+spec:
+  replicas: {{ .Values.headless.replicaCount }}
+  selector:
+    matchLabels:
+{{ include "gentrail.selectorLabels" (merge (dict "component" "headless") .) | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "gentrail.selectorLabels" (merge (dict "component" "headless") .) | indent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+{{ include "gentrail.imagePullSecrets" . | indent 6 }}
+      containers:
+        - name: headless
+          image: {{ include "gentrail.image" (merge (dict "component" "headless") .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: HEADLESS_LISTEN_ADDRESS
+              value: "0.0.0.0:8080"
+            - name: GENTRAIL_MODULES
+              value: {{ join "," .Values.headless.modules | quote }}
+{{- if or (has "rules" .Values.headless.modules) (has "findings" .Values.headless.modules) (has "approvals" .Values.headless.modules) }}
+            - name: NATS_URL
+              value: "nats://nats:4222"
+{{- end }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.headless.databaseSecretName }}
+                  key: {{ .Values.headless.databaseSecretKey }}
+{{- if has "rules" .Values.headless.modules }}
+            - name: RULES_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.headless.rulesDatabaseSecretName }}
+                  key: {{ .Values.headless.rulesDatabaseSecretKey }}
+{{- end }}
+{{- if has "observations" .Values.headless.modules }}
+            - name: TRACES_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.headless.tracesDatabaseSecretName }}
+                  key: {{ .Values.headless.tracesDatabaseSecretKey }}
+{{- end }}
+{{- include "gentrail.licenseEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.headless.resources | nindent 12 }}
+          startupProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+            failureThreshold: 72
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 30
+          volumeMounts:
+{{- include "gentrail.licenseMount" . | nindent 12 }}
+      volumes:
+{{- include "gentrail.licenseVolume" . | nindent 8 }}
+{{- end }}
