@@ -1,6 +1,16 @@
 # Upgrade a BYOC installation
 
-An operator upgrades the application through Helm. Updating the CLI or changing
+Use `gentrail update --check` to review and `gentrail update` to apply a customer
+deployment release. It preserves Helm settings, verifies release checksums,
+uses immutable image digests, and waits for workloads and startup jobs.
+Choose another target with `--stack`, `--region`, and `--profile`.
+Use `--version vX.Y.Z` for a specific release and `--yes` for automation.
+Interrupted Standard updates keep running in AWS; reconnect using the printed
+`gentrail update --resume OPERATION_ID` command. Enterprise upgrades run on the
+operator machine, which must remain connected until completion or rollback.
+Windows ARM64 uses the verified x64 Helm tool through Windows emulation.
+
+The manual procedure below is for operators using Helm. Updating the CLI or changing
 a CloudFormation `RepoBranch` parameter does not update the running application.
 The commands below use Helm 3 and the default release and namespace, `gentrail`.
 Adjust them if your installation uses different names.
@@ -64,7 +74,7 @@ license material. Record the current revision for recovery.
 umask 077
 mkdir gentrail-upgrade
 cd gentrail-upgrade
-TARGET_VERSION=v0.13.2
+TARGET_VERSION=v0.13.3
 helm get values gentrail --namespace gentrail -o yaml > current-values.yaml
 helm history gentrail --namespace gentrail > history-before.txt
 git clone --depth 1 --branch "$TARGET_VERSION" \
@@ -81,7 +91,7 @@ version if you chose another release:
 
 ```yaml
 image:
-  tag: v0.13.2
+  tag: v0.13.3
 ```
 
 If `image.references` contains digest-pinned overrides, update each enabled

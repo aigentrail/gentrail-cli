@@ -1,9 +1,11 @@
+{{- $modules := .Values.headless.modules }}
 {{- if .Values.headless.routeApplications }}
 {{- if not .Values.headless.enabled }}
 {{- fail "routing application APIs requires headless.enabled" }}
 {{- end }}
+{{- $modules = uniq (concat $modules (list "decisions" "observations")) }}
 {{- range $required := list "rules" "policy" "policy-groups" "findings" "approvals" }}
-{{- if not (has $required $.Values.headless.modules) }}
+{{- if not (has $required $modules) }}
 {{- fail "dashboard application routing requires rules, policy, policy-groups, findings and approvals" }}
 {{- end }}
 {{- end }}
@@ -12,13 +14,13 @@
 {{- if not (index (.Values.image.references | default dict) "headless") }}
 {{- fail "enabled headless requires image.references.headless pinned to a digest" }}
 {{- end }}
-{{- if or (has "policy" .Values.headless.modules) (has "policy-groups" .Values.headless.modules) }}
-{{- if not (has "rules" .Values.headless.modules) }}
+{{- if or (has "policy" $modules) (has "policy-groups" $modules) }}
+{{- if not (has "rules" $modules) }}
 {{- fail "headless policy and policy-groups require rules" }}
 {{- end }}
 {{- end }}
-{{- if has "decisions" .Values.headless.modules }}
-{{- if or (not (has "rules" .Values.headless.modules)) (not (has "approvals" .Values.headless.modules)) }}
+{{- if has "decisions" $modules }}
+{{- if or (not (has "rules" $modules)) (not (has "approvals" $modules)) }}
 {{- fail "headless decisions require rules and approvals" }}
 {{- end }}
 {{- end }}
@@ -31,6 +33,7 @@ metadata:
 {{ include "gentrail.labels" (merge (dict "component" "headless") .) | indent 4 }}
 spec:
   replicas: {{ .Values.headless.replicaCount }}
+  strategy: {type: Recreate}
   selector:
     matchLabels:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "headless") .) | indent 6 }}
@@ -65,8 +68,8 @@ spec:
             - name: HEADLESS_LISTEN_ADDRESS
               value: "0.0.0.0:8080"
             - name: GENTRAIL_MODULES
-              value: {{ join "," .Values.headless.modules | quote }}
-{{- if or (has "rules" .Values.headless.modules) (has "findings" .Values.headless.modules) (has "approvals" .Values.headless.modules) }}
+              value: {{ join "," $modules | quote }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) }}
 {{- include "gentrail.natsClientEnv" . | nindent 12 }}
             - name: NATS_URL
               value: "tls://nats:4222"
@@ -76,14 +79,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.headless.databaseSecretName }}
                   key: {{ .Values.headless.databaseSecretKey }}
-{{- if has "rules" .Values.headless.modules }}
+{{- if has "rules" $modules }}
             - name: RULES_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.headless.rulesDatabaseSecretName }}
                   key: {{ .Values.headless.rulesDatabaseSecretKey }}
 {{- end }}
-{{- if has "observations" .Values.headless.modules }}
+{{- if has "observations" $modules }}
             - name: TRACES_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -103,12 +106,12 @@ spec:
             tcpSocket: { port: http }
             periodSeconds: 30
           volumeMounts:
-{{- if or (has "rules" .Values.headless.modules) (has "findings" .Values.headless.modules) (has "approvals" .Values.headless.modules) }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) }}
 {{- include "gentrail.natsClientMount" . | nindent 12 }}
 {{- end }}
 {{- include "gentrail.licenseMount" . | nindent 12 }}
       volumes:
-{{- if or (has "rules" .Values.headless.modules) (has "findings" .Values.headless.modules) (has "approvals" .Values.headless.modules) }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) }}
 {{- include "gentrail.natsClientVolume" (dict "role" "headless") | nindent 8 }}
 {{- end }}
 {{- include "gentrail.licenseVolume" . | nindent 8 }}

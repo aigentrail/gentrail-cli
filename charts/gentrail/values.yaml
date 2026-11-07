@@ -19,10 +19,10 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.13.2
+  tag: v0.13.3
   pullPolicy: IfNotPresent
   pullSecret: ""
-  references: {}
+  references: {"authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:60e91b5fb29c1f84bd314d12fbe064583c76f54eae79dce2012d5fcac90ce5e3","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:e4e9ad94e3e5459572946e90c169190cb1f9f31e5fc6a94e74a0bc9e7335a561","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:d3835a59adeca534cd02c04e959e6191e93932fce32bcbd1f3691461685a7352","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:f2b9dc4a5668eca35d7b628adc8f43f16a83f73836a97e0608a39c617f9eb8f1","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:07636058860a7032558e7fe984574c7febb8db43ef3dfc5c1a33ce4770b8c184","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:72e3e1749e55d45e66b9056d6be8cb12006cf0b9ce2d84b1a755435974df8309"}
 ingress:
   # Set by the production bootstrap from the substrate outputs: CloudFormation
   # owns the load balancers, the chart only binds pods into their target groups.

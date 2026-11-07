@@ -48,21 +48,29 @@ billable after teardown.
 
 ## Updates
 
-**CLI:** stop any local runtime and close Gentrail, then rerun the installer
-above. Saved data and connections are preserved. Reuse `GENTRAIL_BIN_DIR` if you
-chose a custom install directory. Run `gentrail version` to check the result,
-then reopen Gentrail and restart your coding agents. Update any separately
-managed `gentrail-hook` binary from the same release.
+**AWS deployment:** review and apply the latest stable application release:
+
+```sh
+gentrail update --check
+gentrail update
+```
+
+Uses your saved AWS workspace. Select another deployment with `--stack`,
+`--region`, and `--profile`, or a specific release with `--version vX.Y.Z`.
+Settings, storage, and keys are preserved. Services restart briefly; failed
+upgrades attempt an application rollback. Database migrations are not reversed.
+The command prints an operation ID and recovery instructions if interrupted.
+Standard updates continue in AWS; keep the CLI open for Enterprise updates.
+
+If your CLI does not recognize `update`, rerun the installer above first.
+Updating the CLI alone does not update an AWS deployment.
 
 **Local runtime:** back up with `gentrail snapshot`, update the CLI, then restart
 `gentrail serve` using the same data directory. For custom storage, pass the same
 `--data-dir` to snapshot and serve.
 
-**AWS installation:** an operator applies the new Helm chart and matching images.
-Follow the [BYOC upgrade guide](charts/gentrail/upgrading.md) to preserve settings,
-verify the deployment, and handle rollback. Updating the CLI or rerunning
-`gentrail install` does not upgrade an existing AWS application. There is no
-`gentrail upgrade` command yet.
+See the [operator upgrade guide](charts/gentrail/upgrading.md) for manual Helm
+operations and database recovery.
 
 ## More
 
