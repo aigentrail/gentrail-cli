@@ -19,7 +19,7 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.13.1
+  tag: v0.13.2
   pullPolicy: IfNotPresent
   pullSecret: ""
   references: {}

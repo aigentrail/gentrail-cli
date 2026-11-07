@@ -396,7 +396,7 @@ Resources:
             fi
             LICENSE_SET=""
             if [ -f /opt/gentrail/license.jwt ]; then LICENSE_SET="--set-file license.jwt=/opt/gentrail/license.jwt"; fi
-            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set dashboard.useInstanceProfile=true $LICENSE_SET $TUNNEL_SET --wait --timeout 15m
+            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set dashboard.useInstanceProfile=true $LICENSE_SET $TUNNEL_SET --wait --wait-for-jobs --timeout 15m
             INSTALL
             chmod 600 /opt/gentrail/fetch.sh /opt/gentrail/install.sh
 

@@ -12,7 +12,7 @@ spec:
       labels:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "nats-bootstrap") .) | indent 8 }}
     spec:
-      restartPolicy: Never
+      restartPolicy: OnFailure
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

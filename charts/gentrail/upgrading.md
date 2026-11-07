@@ -64,7 +64,7 @@ license material. Record the current revision for recovery.
 umask 077
 mkdir gentrail-upgrade
 cd gentrail-upgrade
-TARGET_VERSION=v0.13.1
+TARGET_VERSION=v0.13.2
 helm get values gentrail --namespace gentrail -o yaml > current-values.yaml
 helm history gentrail --namespace gentrail > history-before.txt
 git clone --depth 1 --branch "$TARGET_VERSION" \
@@ -81,7 +81,7 @@ version if you chose another release:
 
 ```yaml
 image:
-  tag: v0.13.1
+  tag: v0.13.2
 ```
 
 If `image.references` contains digest-pinned overrides, update each enabled

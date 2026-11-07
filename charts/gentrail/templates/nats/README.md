@@ -31,6 +31,9 @@ operation-evaluator, trace-outbox-acks, operation-outbox-acks and
 compliance-exceptions. Runtime clients verify the stream and bind to provisioned
 consumers without management permissions.
 
+Retries keep the same pod and network identity. Hosted upgrades wait for Job
+completion as well as workload readiness.
+
 Dashboard refresh hints use explicit live subscriptions for every replica. A
 bounded 4096-entry window suppresses recent publication IDs for two minutes.
 Overflow, reconnect gaps and duplicate hints are reconciled from SQL; this cache

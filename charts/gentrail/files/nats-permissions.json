@@ -45,6 +45,7 @@
             "events.approval.changed.v1",
             "events.scan.changed.v1",
             "events.enforcement.recorded",
+            "events.overview.changed.v1",
             "$JS.API.CONSUMER.INFO.EVENTS.compliance-exceptions",
             "$JS.API.CONSUMER.MSG.NEXT.EVENTS.compliance-exceptions",
             "$JS.ACK.EVENTS.compliance-exceptions.>",
@@ -58,7 +59,8 @@
             "events.agent.updated",
             "events.approval.changed.v1",
             "events.scan.changed.v1",
-            "events.enforcement.recorded"
+            "events.enforcement.recorded",
+            "events.overview.changed.v1"
         ]
     },
     "headless": {
@@ -67,10 +69,18 @@
             "events.rule.changed",
             "events.finding.changed.v1",
             "events.approval.changed.v1",
-            "events.enforcement.recorded"
+            "events.enforcement.recorded",
+            "events.overview.changed.v1"
         ],
         "subscribe": [
-            "_INBOX.headless.>"
+            "_INBOX.headless.>",
+            "events.rule.changed",
+            "events.finding.changed.v1",
+            "events.violation.created",
+            "events.agent.updated",
+            "events.approval.changed.v1",
+            "events.scan.changed.v1",
+            "events.enforcement.recorded"
         ]
     },
     "operator": {
