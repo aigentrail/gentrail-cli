@@ -1,210 +1,175 @@
 # Gentrail
 
-The Gentrail CLI connects coding agents to your organization’s Gentrail instance,
-runs Gentrail locally, and deploys it to your AWS account. Desktop setup
-applications are released separately when available.
+Gentrail provides AI agent governance and compliance monitoring. Use the CLI to
+connect Claude Code or Codex to an existing Gentrail instance, run locally, or
+deploy into your AWS account.
 
-## Desktop setup
-
-When a desktop release is available, choose its package for your computer from
-the [release list](https://github.com/aigentrail/gentrail-cli/releases).
-CLI releases do not require matching desktop installers.
-
-1. Open the Windows installer, or extract the macOS/Linux archive and open
-   Gentrail Setup. Installation is for your user account.
-2. Select Claude Code or Codex and choose one project or all your projects.
-3. Enter your organization’s Gentrail server URL, leave the API key blank, and
-   choose **Continue**. Sign in to Gentrail in the browser and approve the
-   computer after checking that the approval code matches the wizard.
-4. Return to the wizard and choose **Continue**. Review the permissions and
-   trace collector, test the connection, and install the hooks.
-5. Restart your coding agent, review or trust the Gentrail hooks, and try a tool call.
-
-Browser approval creates a key scoped to this agent and saves it privately on
-your computer. You do not need to copy a key. Existing agent API keys can also
-be entered manually; they are different from license keys. An unfinished
-connection is removed when you cancel setup. To revoke an installed connection,
-open **Integrations → Your computers** in Gentrail and remove that computer.
-
-When your company already runs Gentrail, use that instance. You do not need to
-start a local server or deploy another AWS stack.
-
-To add an employee, an organization administrator opens **Integrations → Team
-invitations**, enters their work email, and shares the invitation privately.
-The employee follows the link, chooses a password, and completes their profile.
-Profile setup then opens **Your computers** with instructions for connecting
-Gentrail Setup to the existing company instance.
-Invitations expire after 72 hours, work once, and can be revoked from the same
-page. New accounts are members. Invitation links are shown only when created;
-create a new invitation if the original link is lost.
-
-These preview applications are unsigned. Your operating system may display a
-warning when you open them. Checksums for every download are included in the
-release’s `SHA256SUMS` file.
-
-Run Gentrail Setup again to update or disconnect an agent. Disconnect every
-agent before choosing Remove application; saved data is retained.
-
-## CLI installation
+## Install the CLI
 
 On macOS or Linux:
 
-```bash
+```sh
 curl -LsSf https://gentrail.ai/install.sh | sh
+gentrail version
 gentrail
 ```
 
-On Windows, paste this into PowerShell:
+On Windows, run in PowerShell:
 
 ```powershell
 irm https://gentrail.ai/install.ps1 | iex
+gentrail version
 gentrail
 ```
 
-Run the same install command to update.
+The installers download the latest stable CLI and verify its SHA256 checksum.
+Linux, macOS, and Windows binaries are available for AMD64 and ARM64 on the
+[release page](https://github.com/aigentrail/gentrail-cli/releases).
+You do not need to clone this repository.
 
-For manual installation, binaries and checksums are on
-[Releases](https://github.com/aigentrail/gentrail-cli/releases).
+## Connect a coding agent
 
-The CLI menu handles setup, licenses, agent connections, and AWS deployments.
-You don't need to clone this repo.
+If your organization already runs Gentrail, connect to that instance.
+Open `gentrail`, choose **Connect an agent**, select Claude Code or Codex, and
+choose the project or all-projects scope. For an AWS workspace, the server
+addresses are filled in. For local use, setup finds the local API key.
+
+Follow setup to configure the connection and permissions. Restart the coding
+agent, review and trust the hooks, then ask it to read a small file. Setup waits
+for a stored policy check before offering **View activity**. Registration and
+connection tests alone do not count as a policy check.
+
+In Claude Code or Codex CLI, use `/hooks` to inspect installed hooks. In Codex
+desktop, open **Settings → Hooks** and select your project. Run connection setup
+again to review, change, or remove the saved settings.
+
+Hooks govern tool calls. For application traces and model usage, use the
+[SDK](https://github.com/aigentrail/sdk) with your instance's OTLP endpoint and
+an API key from **Integrations**. API keys and license keys are separate.
 
 ## Run locally
 
-Choose **Open local workspace**, then **Start Gentrail**. On first launch, request a free license, paste an
-existing key, or continue to set up your license in the browser.
-Agent activity requires a license.
-The dashboard opens in your browser once ready;
-its address is also printed in the terminal.
+Open `gentrail`, choose **Open local workspace**, then **Start Gentrail**, or run:
 
-The menu stays available while Gentrail runs. Connect agents, view logs, or open
-the dashboard from the local workspace. Quitting the CLI stops the instance it
-started; your data stays in `~/.gentrail`. If Gentrail is already running in
-another terminal, the workspace connects to it and leaves it running on exit.
-To run the service directly, use `gentrail serve`.
-Add `--export-to <dir or s3://bucket/prefix>` to also write traces and tool
-calls as Parquet for DuckDB or a shared bucket.
+```sh
+gentrail serve
+```
 
-The CLI remembers your last workspace. Local opens its status screen on the
-next launch. AWS remembers the stack, region, profile, and connection addresses;
-a project's `gentrail.toml` takes precedence.
+The native runtime needs no container engine. By default, the dashboard listens
+on `http://127.0.0.1:7331` and OTLP ingestion on `http://127.0.0.1:4318`.
+Local data and the license live in `~/.gentrail`, unless you select another data
+directory. Agent activity requires a license; setup can request or install one.
 
-Set `GENTRAIL_NO_BROWSER=1` to skip opening the browser. Scripted runs do not
-open it. Set `GENTRAIL_NO_PROGRESS=1` to hide installer download progress.
+Stopping the local runtime preserves its data. Reuse the same data directory
+when starting it again. `GENTRAIL_NO_BROWSER=1` disables automatic browser opening.
 
-## Connect an agent
-
-Choose **Connect an agent** in the CLI. If you started with `gentrail serve`,
-open `gentrail` in another terminal first. Select
-Claude Code or Codex, then choose this project or all your projects.
-
-For local use, setup finds your API key automatically. For AWS, choose
-**Connect an agent** from the AWS workspace. The URLs are filled in; get an API
-key from **Integrations** in the dashboard.
-
-After setup, restart Claude Code and check `/hooks`. In the Codex desktop app,
-open **Settings → Hooks**, select your project, and review and trust the Gentrail
-hooks. In Codex CLI, use `/hooks`. Ask the agent to read a small file. The CLI waits
-for Gentrail to store that hook's policy check, then offers **View activity**.
-Registration and connection tests do not count as a real policy check.
-
-You can leave this screen and return later. Choose the same agent and scope
-to verify the saved setup without changing its settings. If no activity arrives,
-check hook trust, project scope, and the saved connection.
-
-Blocked calls are denied. Calls that need approval prompt in Claude Code and
-are denied in Codex. Setup also lets you choose what happens when Gentrail
-cannot be reached. Run setup again to update or remove the hook.
-
-Hooks report checks before execution, not tool results or model usage. For
-those, use the [SDK](https://github.com/aigentrail/sdk) with an API key from
-**Integrations** and your Gentrail OTLP endpoint. Locally, that endpoint is
-`http://127.0.0.1:4318`. API keys and license keys are separate.
-To print SDK environment commands, start with `gentrail serve --sdk-env`.
-These commands include your API key; keep them private.
+Use `gentrail serve --sdk-env` to print SDK environment commands, including your
+API key. Keep that output private. `--export-to <directory or s3://bucket/prefix>`
+also exports closed trace windows as Parquet.
 
 ## Deploy to AWS
 
-Configure AWS credentials for the target account, then choose **Deploy Gentrail**.
-Setup checks your AWS credentials and connection tools, then shows the account,
-plan, and cost estimate before creating resources.
+Configure AWS credentials for the target account, then choose **Deploy Gentrail**
+in the CLI. Review the account, region, resources, and installation profile
+before confirming.
 
-| Deployment | Runs on               | Storage                                                                    |
-| ---------- | --------------------- | -------------------------------------------------------------------------- |
-| Evaluation | One EC2 node with k3s | On the node; replacing or deleting it loses the data                       |
-| Production | EKS                   | RDS, DynamoDB, and S3, with KMS encryption and S3 Object Lock for evidence |
+| Profile | Runtime | Storage |
+| --- | --- | --- |
+| `local` | Native runtime on your computer | SQLite and local files; no AWS resources |
+| `standard` | One ARM64 k3s node, initially `t4g.medium` | Private RDS PostgreSQL, persistent node-local NATS, S3 evidence and trace archives |
+| `enterprise` | EKS | Managed PostgreSQL, S3 evidence and archives, KMS, and selected availability settings |
+
+Standard creates no EKS cluster, NAT gateway, or load balancer. It shares a
+single-node application and broker failure domain. Neither a profile name nor a
+license plan is a capacity or availability guarantee. AWS bills the resources
+in your account, including retained storage and snapshots.
 
 Your AWS principal needs the [deployment permissions](iac/cfn/deploy-policy.json).
-AWS charges for the resources in your account.
+For scripted installation, save your settings in `gentrail.toml`, then run:
 
-Setup opens the AWS workspace when installation finishes. Choose
-**Open AWS workspace** to reconnect later. This needs `aws` and `kubectl`;
-Evaluation also needs the AWS Session Manager plugin. For Production, your
-principal needs EKS access. The principal that installed it already has access.
-
-Keep the CLI open while using the connection. The workspace has agent setup,
-logs, and a reconnect action that does not repeat deployment. Quitting disconnects
-your machine; AWS resources keep running.
-Both AWS deployments have **no dashboard login**. Use the CLI tunnel or keep
-access limited to your network. Production endpoints are private by default.
-
-### Export traces
-
-Production can copy traces and tool calls into an S3 bucket you own, as
-Parquet partitioned by org, date, and hour, for Athena, BigQuery, Snowflake, or
-DuckDB. Answer **Export bucket** in the setup questions, or set
-`data.export_bucket` in `gentrail.toml`. Each 5-minute window arrives about 15
-minutes after it closes, and the first run backfills the last 24 hours.
-
-The bucket can live in another account. Its bucket policy must allow
-`s3:PutObject` under the export prefix for the stack's exporter role (the
-`ExporterIrsaRole` resource), and a bucket encrypted with your own KMS key must
-let that role call `kms:GenerateDataKey`.
-
-### Scripts
-
-Setup saves deployment settings in `gentrail.toml`, without the license key:
-
-```bash
+```sh
 gentrail install --plan gentrail.toml --yes
 ```
 
-Use `GENTRAIL_LICENSE_JWT` for a license key or JWT file path. Keep keys out of
-version control. See `gentrail <command> --help` for flags; use the same stack
-name and region when returning to a deployment.
+Use `GENTRAIL_LICENSE_JWT` for a license JWT or its file path. Keep credentials
+and license keys out of version control.
 
-### Remove a deployment
+Use **Open AWS workspace** or `gentrail connect` to reconnect. Connection needs
+the AWS CLI and `kubectl`; standard also needs the AWS Session Manager plugin.
+Enterprise requires access to its EKS cluster. Closing the connection leaves
+the AWS deployment running. Keep endpoints private unless you deliberately
+configure external access. Application sign-in follows the installation's
+license and authentication configuration.
 
-Choose **Remove deployment**, or run `gentrail teardown`.
+## Updates
 
-Evaluation deletes the node and its data. Production deletes EKS, RDS, and
-stack-owned load balancers, taking a final RDS snapshot. DynamoDB tables, S3
-buckets, and the KMS key remain and can still incur charges. Delete retained
-resources separately when no longer needed; retained table names can prevent
-reusing the same stack name.
+### Update the CLI
 
-## What's in this repo
+Stop any local Gentrail runtime and close the CLI, then rerun the installation
+command above for your operating system. The installer replaces the executable;
+it does not delete saved workspaces, connections, licenses, or local data.
+If you used `GENTRAIL_BIN_DIR`, use the same directory when updating.
 
-The [Helm chart](charts/gentrail), [CloudFormation templates](iac/cfn), and
-native SQL schema initialization. CLI binaries ship with releases; the chart
-pulls public container images. Application source is not included.
+Confirm the installed version with `gentrail version`, then reopen Gentrail and
+restart your coding agents. If you manage a standalone `gentrail-hook` binary,
+replace it with the matching release asset as well; the CLI installer updates
+the CLI executable only.
 
-## Tokenization encryption keys
+To select a specific CLI release on macOS or Linux:
 
-AWS installation creates a dedicated tokenization key and scoped permissions by
-default. The key persists across release upgrades and is retained when the
-CloudFormation stack is removed. Keep it while stored organization data keys
-depend on it. Retained keys can continue to incur AWS charges.
+```sh
+curl -LsSf https://gentrail.ai/install.sh | GENTRAIL_VERSION=v0.13.1 sh
+```
 
-To supply your own key, set the install plan's `data.pii_kms_key_arn` answer or
-the CloudFormation `ExistingPiiTokenizationKeyArn` parameter. Its key policy must
-permit the deployment's dashboard identity to generate and decrypt data keys
-with the `gentrail:purpose=pii-tokenization` encryption context. Production uses
-the dashboard IRSA role; the single-node evaluation appliance uses its instance
-profile. The installer propagates the selected key and its region automatically.
+In PowerShell:
 
-An administrator enables Tokenize in the dashboard when the organization is
-ready. The deployment key needs no manual ARN entry there. Existing organization
-keys remain unchanged across upgrades, and changing the deployment default does
-not repoint an organization's wrapped keys. Employees only connect to their
-company dashboard; they do not configure encryption keys.
+```powershell
+$env:GENTRAIL_VERSION = 'v0.13.1'
+irm https://gentrail.ai/install.ps1 | iex
+Remove-Item Env:GENTRAIL_VERSION
+```
+
+Omit `GENTRAIL_VERSION` to use the latest stable release.
+
+### Update a local runtime
+
+Back up its data with `gentrail snapshot` before changing versions. If you use
+a custom data directory, pass the same `--data-dir` to snapshot and serve.
+Update the CLI, then restart `gentrail serve` with your existing data directory.
+The local runtime is included in the CLI binary.
+
+### Update an AWS installation
+
+Updating the CLI does not upgrade an existing AWS installation. Publishing a
+release does not automatically change customer deployments either.
+
+An operator applies the target release's Helm chart and matching images using
+the installation's saved settings. Follow the [BYOC upgrade guide](charts/gentrail/upgrading.md)
+for preflight checks, configuration preservation, verification, and rollback.
+There is currently no `gentrail upgrade` command. Rerunning `gentrail install`
+on an existing stack is not an application upgrade procedure.
+
+### Desktop setup
+
+Native desktop installers have a separate release cadence. CLI releases do not
+require matching GUI packages. Use the CLI instructions above unless a desktop
+installer is explicitly available for your platform.
+
+## Remove an AWS deployment
+
+Choose **Remove deployment** or run `gentrail teardown` with the correct stack,
+region, and AWS profile. Standard removes its node and RDS instance; enterprise
+also removes its EKS cluster and stack-owned load balancers.
+
+Both retain a final database snapshot, S3 storage, and the tokenization KMS key.
+Enterprise can also retain log and template-staging buckets. Retained resources
+remain billable and need separate lifecycle management. Keep encryption keys
+while retained organization data depends on them.
+
+## Repository contents
+
+This repository distributes the [Helm chart](charts/gentrail),
+[CloudFormation templates](iac/cfn), and release binaries. The chart pulls public
+container images. Application source is not included.
+
+Use `gentrail <command> --help` for command flags.
