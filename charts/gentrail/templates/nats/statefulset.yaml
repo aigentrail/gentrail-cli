@@ -19,6 +19,7 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/nats/config.yaml") . | sha256sum }}
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -35,7 +36,8 @@ spec:
             - { name: monitor, containerPort: 8222 }
           resources: {{- toYaml .Values.nats.resources | nindent 12 }}
           readinessProbe:
-            httpGet: { path: /healthz, port: monitor }
+            exec:
+              command: ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8222/healthz"]
             initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
@@ -43,7 +45,9 @@ spec:
             - { name: data, mountPath: /data }
       volumes:
         - name: config
-          configMap: { name: nats }
+          secret:
+            secretName: nats-server
+            defaultMode: 0440
         {{- if eq .Values.nats.storage "ephemeral" }}
         - name: data
           emptyDir: { sizeLimit: {{ .Values.nats.jetstreamSize | quote }} }

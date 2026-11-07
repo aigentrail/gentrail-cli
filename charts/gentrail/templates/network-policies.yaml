@@ -117,9 +117,14 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app.kubernetes.io/component, operator: In, values: [ dashboard, evaluator, authproxy, headless, nats ] }
+              - { key: app.kubernetes.io/component, operator: In, values: [ dashboard, evaluator, authproxy, headless, nats-bootstrap ] }
       ports:
         - { protocol: TCP, port: 4222 }
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
         - { protocol: TCP, port: 6222 }
 ---
 # NATS reaches its peers for clustering (6222) and DNS to resolve them.
@@ -480,4 +485,28 @@ spec:
         - ipBlock: {cidr: 169.254.169.254/32}
       ports:
         - {protocol: TCP, port: 80}
+{{- end }}
+
+{{- if .Values.networkPolicies.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats-bootstrap-egress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: nats-bootstrap
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - {protocol: TCP, port: 4222}
+    - ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
 {{- end }}

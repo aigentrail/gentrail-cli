@@ -1,81 +1,68 @@
 # NATS event transport
 
-The chart deploys NATS JetStream for dashboard, authproxy and evaluator events.
-The former SNS/SQS pipeline and EC2/systemd migration proposals are retired;
-there is no transport-selection flag or parallel SNS ingestion path.
+NATS carries committed facts; SQL rows and transactional outboxes remain the
+application authority. EVENTS retains events for one hour with a two-minute
+publication duplicate window. Broker storage is not a replay archive.
 
-The shared Go event-stream contract owns stream `EVENTS`, subject prefix `events.`, a one-hour maximum event age and
-a two-minute duplicate window. Authproxy publishes `trace.ingested`; the evaluator
-publishes `violation.created` and `agent.updated` for dashboard fan-out.
-DynamoDB remains the durable activity store. Expired broker messages are not a
-replay archive, and broker persistence alone does not certify complete recovery.
+## Service identity
 
-Live trace deliveries share a twenty-second processing deadline across storage,
-evaluation and publication. Shutdown lets in-flight deliveries drain within that
-budget. Failed or timed-out evaluations request redelivery instead of acknowledging
-success; the consumer retains its sixty-second acknowledgement wait.
+Networked clients require TLS with the mounted CA and their own client.json
+credential file. Authproxy, evaluator, dashboard and headless receive separate
+Secrets. Operator bootstrap receives a separate credential, never application
+credentials or cloud authority. Application pods do not receive the server key
+or operator credential. Anonymous connections are supported only for loopback
+development and test brokers, not network endpoints.
 
-Enabled evaluator recovery sweeps resume an existing per-tenant cursor without
-truncating old progress to the stream's retention window. Each sweep processes
-at most 500 traces per tenant and stays five minutes behind live traffic. Range
-reads use strong consistency and stop after eight queries of at most 250 evaluated
-items, within a ten-second read budget. Progress comes from the scanned range,
-including filtered tool rows, and is saved only after returned traces evaluate
-successfully. A bounded partial read resumes next sweep instead of skipping to
-the time horizon. A tenant
-without a cursor still bootstraps from the previous hour; this is not a full
-historical rebuild. Recovery reads retained DynamoDB rows, not cold archives.
+The allowlists in iac/nats.cue generate files/nats-permissions.json. They restrict
+fact publication, reads from assigned consumers, acknowledgments and reply
+inboxes. Each service uses its own _INBOX prefix so it cannot subscribe to replies
+for another service. Application identities cannot create, modify or delete
+streams or consumers. The operator may provision EVENTS but cannot read raw
+business events. Broker permissions do not authenticate tenant IDs inside events;
+shared multi-tenant services remain responsible for tenant isolation.
 
-Each tenant's recovery evaluation shares the live twenty-second processing
-budget, including cursor reads, tool and rule loads, evaluation and writes.
-The shorter ten-second range-read budget remains inside it. Canceled or timed-out
-work never advances past an incomplete trace; cancellation also stops the sweep
-before it starts another tenant. Tenant discovery has its own twenty-second
-budget before these per-tenant budgets. Rule-cache waits honor cancellation;
-canceled refreshes do not report a successful stale catalog. Transient storage
-errors can still use the last cached catalog.
+## Bootstrap and delivery
 
-Recovery reserves the final two seconds of each tenant budget for one cursor
-checkpoint. A failed batch can checkpoint its contiguous prefix of durable
-complete or partial evaluations, so the next sweep resumes at the first failed
-trace. Success after a gap cannot move the checkpoint past that gap. Caller
-cancellation prevents checkpointing, and a process crash safely repeats work
-from the previous durable cursor. No per-trace checkpoint writes are added.
+A normal revision-scoped bootstrap Job uses the evaluator image with
+--bootstrap-broker before application workers can bind to their consumers. It is
+not a post-install Helm hook, which would deadlock installs using --wait. The Job
+creates or updates EVENTS and five durable consumers: evaluator,
+operation-evaluator, trace-outbox-acks, operation-outbox-acks and
+compliance-exceptions. Runtime clients verify the stream and bind to provisioned
+consumers without management permissions.
 
-New evaluator findings and their pending `violation.created` notifications are
-committed in one DynamoDB transaction. Pending rows use `OUTBOX#VIOLATIONS` in
-the existing violations table, outside tenant rows and indexes. The evaluator
-flushes after new findings and polls every two seconds, independently of rules,
-licenses and recovery cursors. Each sweep reads at most 100 rows within a
-20-second budget. Each sweep groups notifications by tenant and deduplicates trace IDs, so several
-findings on one trace do not repeat the compliance lookup for every finding.
-A row is deleted only after JetStream accepts its event;
-publication or cleanup failure retains it for retry. Duplicate delivery is
-expected and compliance exception identities remain idempotent.
+Dashboard refresh hints use explicit live subscriptions for every replica. A
+bounded 4096-entry window suppresses recent publication IDs for two minutes.
+Overflow, reconnect gaps and duplicate hints are reconciled from SQL; this cache
+cannot determine business state. Compliance processing remains durable and
+explicitly acknowledged. Broker reconnects restore live subscriptions.
 
-Apply the evaluator's `DeleteItem` IAM grant before rolling out this writer.
-No table or index migration is required. Previously stored findings do not gain
-pending rows retroactively; stream retention still bounds downstream recovery
-after a notification has been accepted and its outbox row removed.
+## Credentials and rotation
 
-## Replicas
+Helm preserves the current CA, server certificate and role passwords through
+Secret lookup. Increment nats.credentialRevision and perform a coordinated Helm
+upgrade to rotate them. Secret checksums roll the broker and application pods;
+clients reread password files on reconnect. CA changes require the pod rollout,
+not just a password-file update. Server certificates last one year; rotate before
+expiry. Single-node rotation can interrupt delivery while pods reconnect. Durable
+SQL outboxes retain unacknowledged work for retry.
 
-`nats.replicas` sets the StatefulSet size and `NATS_STREAM_REPLICAS` for the
-services. The default is one; a three-node cluster uses three stream replicas.
-Keep the broker count and stream replication consistent. An unset
-`NATS_STREAM_REPLICAS` uses one replica for local defaults; malformed, zero or
-negative explicit values fail before publishers can update the stream. A shared chart does not
-by itself establish deployment parity, availability or tested failover.
+Server configuration is a Secret. Monitoring binds to loopback and is not exposed
+by either Service. Cluster peers use TLS, certificate verification and a separate
+cluster password; the peer port accepts traffic only from broker pods. The
+bootstrap pod has no Kubernetes service-account token.
 
-## Storage
+The compose-backed gentrail local command generates private certificate and role
+files before startup and preserves them on later starts. Each container mounts
+only its role directory. Stop the stack before replacing these files for local
+rotation. Native gentrail serve provisions its embedded loopback broker and
+does not require an external NATS deployment. The loopback integration
+harness invokes operator bootstrap before starting services.
 
-`nats.storage` declares `ephemeral` or `persistent`. Both use `nats.jetstreamSize`;
-persistent storage creates the `data` volume claim template and retains its
-contents across pod restarts. Our production CUE stage declares persistent
-storage; dev declares ephemeral storage.
+## Storage and recovery
 
-Upgrades read the existing StatefulSet and reject a change between these storage
-types before applying resources. There is no broker recreation or volume deletion
-hook. An existing persistent installation must keep `nats.storage=persistent`.
-Storage transitions require a separate migration with retention and recovery
-proof; an ordinary application upgrade cannot perform one.
+nats.replicas sets broker and stream replication together. nats.storage selects
+ephemeral or persistent storage; ordinary upgrades reject changing the storage
+kind of an existing StatefulSet. Persistent claims survive broker restarts.
+Recovery reads retained SQL rows and retries SQL outboxes. Restore, capacity and
+multi-node failover qualification remain separate deployment checks.

@@ -13,6 +13,8 @@ spec:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "authproxy") .) | indent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/nats-identity: {{ include "gentrail.natsMaterial" . | sha256sum }}
       labels:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "authproxy") .) | indent 8 }}
     spec:
@@ -35,8 +37,9 @@ spec:
               value: "4318"
             - name: EVENT_BUS
               value: nats
+{{- include "gentrail.natsClientEnv" . | nindent 12 }}
             - name: NATS_URL
-              value: "nats://nats:4222"
+              value: "tls://nats:4222"
             - name: NATS_STREAM_REPLICAS
               value: {{ .Values.nats.replicas | quote }}
 {{ include "gentrail.traceStorageEnv" . | indent 12 }}
@@ -56,8 +59,10 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 30
           volumeMounts:
+{{- include "gentrail.natsClientMount" . | nindent 12 }}
 {{- include "gentrail.licenseMount" . | nindent 12 }}
       volumes:
+{{- include "gentrail.natsClientVolume" (dict "role" "authproxy") | nindent 8 }}
 {{- include "gentrail.licenseVolume" . | nindent 8 }}
 
 {{- end }}

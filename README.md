@@ -1,18 +1,14 @@
 # Gentrail
 
-Connect Claude Code or Codex to your organization’s Gentrail instance with the
-desktop setup application. The CLI also runs Gentrail locally and deploys it to
-your AWS account. Both downloads come from this repository.
+The Gentrail CLI connects coding agents to your organization’s Gentrail instance,
+runs Gentrail locally, and deploys it to your AWS account. Desktop setup
+applications are released separately when available.
 
 ## Desktop setup
 
-Choose the download for your computer:
-
-| Platform | Downloads                                                                                                                                                                                                                                                                          |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows  | [Most PCs (x64)](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.13.0/gentrail-setup-windows-amd64.exe) · [ARM64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.13.0/gentrail-setup-windows-arm64.exe) |
-| macOS    | [Apple Silicon](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.13.0/gentrail-setup-darwin-arm64.zip) · [Intel](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.13.0/gentrail-setup-darwin-amd64.zip)    |
-| Linux    | [x64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.13.0/gentrail-setup-linux-amd64.tar.gz) · [ARM64](https://github.com/aigentrail/gentrail-cli/releases/download/desktop-v0.13.0/gentrail-setup-linux-arm64.tar.gz)          |
+When a desktop release is available, choose its package for your computer from
+the [release list](https://github.com/aigentrail/gentrail-cli/releases).
+CLI releases do not require matching desktop installers.
 
 1. Open the Windows installer, or extract the macOS/Linux archive and open
    Gentrail Setup. Installation is for your user account.

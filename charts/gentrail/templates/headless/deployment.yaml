@@ -36,6 +36,8 @@ spec:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "headless") .) | indent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/nats-identity: {{ include "gentrail.natsMaterial" . | sha256sum }}
       labels:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "headless") .) | indent 8 }}
     spec:
@@ -65,8 +67,9 @@ spec:
             - name: GENTRAIL_MODULES
               value: {{ join "," .Values.headless.modules | quote }}
 {{- if or (has "rules" .Values.headless.modules) (has "findings" .Values.headless.modules) (has "approvals" .Values.headless.modules) }}
+{{- include "gentrail.natsClientEnv" . | nindent 12 }}
             - name: NATS_URL
-              value: "nats://nats:4222"
+              value: "tls://nats:4222"
 {{- end }}
             - name: DATABASE_URL
               valueFrom:
@@ -100,7 +103,13 @@ spec:
             tcpSocket: { port: http }
             periodSeconds: 30
           volumeMounts:
+{{- if or (has "rules" .Values.headless.modules) (has "findings" .Values.headless.modules) (has "approvals" .Values.headless.modules) }}
+{{- include "gentrail.natsClientMount" . | nindent 12 }}
+{{- end }}
 {{- include "gentrail.licenseMount" . | nindent 12 }}
       volumes:
+{{- if or (has "rules" .Values.headless.modules) (has "findings" .Values.headless.modules) (has "approvals" .Values.headless.modules) }}
+{{- include "gentrail.natsClientVolume" (dict "role" "headless") | nindent 8 }}
+{{- end }}
 {{- include "gentrail.licenseVolume" . | nindent 8 }}
 {{- end }}

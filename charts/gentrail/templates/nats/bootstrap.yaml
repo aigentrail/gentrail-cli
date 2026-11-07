@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nats-bootstrap-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 180
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+{{ include "gentrail.selectorLabels" (merge (dict "component" "nats-bootstrap") .) | indent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+{{ include "gentrail.imagePullSecrets" . | indent 6 }}
+      containers:
+        - name: bootstrap
+          image: {{ include "gentrail.image" (merge (dict "component" "evaluator") .) }}
+          args: ["--bootstrap-broker"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          env:
+            - name: NATS_URL
+              value: tls://nats:4222
+            - name: NATS_STREAM_REPLICAS
+              value: {{ .Values.nats.replicas | quote }}
+{{- include "gentrail.natsClientEnv" . | nindent 12 }}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+{{- include "gentrail.natsClientMount" . | nindent 12 }}
+      volumes:
+{{- include "gentrail.natsClientVolume" (dict "role" "operator") | nindent 8 }}

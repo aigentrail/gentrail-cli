@@ -19,7 +19,7 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.13.0
+  tag: v0.13.1
   pullPolicy: IfNotPresent
   pullSecret: ""
   references: {}
@@ -89,8 +89,8 @@ headless:
   tracesDatabaseSecretName: gentrail-rds-secret
   tracesDatabaseSecretKey: dsn
   resources:
-    requests: { cpu: 100m, memory: 128Mi }
-    limits: { cpu: "1", memory: 512Mi }
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
 dashboard:
   enabled: true
   preflight: false
@@ -147,6 +147,7 @@ policyEngine:
 # replicas sets both the NATS cluster size and the EVENTS stream replica factor.
 # 1 for a single-node env, 3 for the HA BYOC cluster.
 nats:
+  credentialRevision: "1"
   replicas: 1
   storage: ephemeral
   jetstreamSize: 5Gi

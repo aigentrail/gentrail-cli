@@ -1,0 +1,96 @@
+{
+    "authproxy": {
+        "publish": [
+            "$JS.API.STREAM.INFO.EVENTS",
+            "events.trace.ingested",
+            "events.operation.observed",
+            "$JS.API.CONSUMER.INFO.EVENTS.trace-outbox-acks",
+            "$JS.API.CONSUMER.INFO.EVENTS.operation-outbox-acks",
+            "$JS.API.CONSUMER.MSG.NEXT.EVENTS.trace-outbox-acks",
+            "$JS.API.CONSUMER.MSG.NEXT.EVENTS.operation-outbox-acks",
+            "$JS.ACK.EVENTS.trace-outbox-acks.>",
+            "$JS.ACK.EVENTS.operation-outbox-acks.>",
+            "$JS.ACK.*.*.EVENTS.trace-outbox-acks.>",
+            "$JS.ACK.*.*.EVENTS.operation-outbox-acks.>"
+        ],
+        "subscribe": [
+            "_INBOX.authproxy.>"
+        ]
+    },
+    "evaluator": {
+        "publish": [
+            "$JS.API.STREAM.INFO.EVENTS",
+            "events.violation.created",
+            "events.agent.updated",
+            "events.trace.processed",
+            "events.operation.processed",
+            "$JS.API.CONSUMER.INFO.EVENTS.evaluator",
+            "$JS.API.CONSUMER.INFO.EVENTS.operation-evaluator",
+            "$JS.API.CONSUMER.MSG.NEXT.EVENTS.evaluator",
+            "$JS.API.CONSUMER.MSG.NEXT.EVENTS.operation-evaluator",
+            "$JS.ACK.EVENTS.evaluator.>",
+            "$JS.ACK.EVENTS.operation-evaluator.>",
+            "$JS.ACK.*.*.EVENTS.evaluator.>",
+            "$JS.ACK.*.*.EVENTS.operation-evaluator.>"
+        ],
+        "subscribe": [
+            "_INBOX.evaluator.>"
+        ]
+    },
+    "dashboard": {
+        "publish": [
+            "$JS.API.STREAM.INFO.EVENTS",
+            "events.rule.changed",
+            "events.finding.changed.v1",
+            "events.approval.changed.v1",
+            "events.scan.changed.v1",
+            "events.enforcement.recorded",
+            "$JS.API.CONSUMER.INFO.EVENTS.compliance-exceptions",
+            "$JS.API.CONSUMER.MSG.NEXT.EVENTS.compliance-exceptions",
+            "$JS.ACK.EVENTS.compliance-exceptions.>",
+            "$JS.ACK.*.*.EVENTS.compliance-exceptions.>"
+        ],
+        "subscribe": [
+            "_INBOX.dashboard.>",
+            "events.rule.changed",
+            "events.finding.changed.v1",
+            "events.violation.created",
+            "events.agent.updated",
+            "events.approval.changed.v1",
+            "events.scan.changed.v1",
+            "events.enforcement.recorded"
+        ]
+    },
+    "headless": {
+        "publish": [
+            "$JS.API.STREAM.INFO.EVENTS",
+            "events.rule.changed",
+            "events.finding.changed.v1",
+            "events.approval.changed.v1",
+            "events.enforcement.recorded"
+        ],
+        "subscribe": [
+            "_INBOX.headless.>"
+        ]
+    },
+    "operator": {
+        "publish": [
+            "$JS.API.STREAM.INFO.EVENTS",
+            "$JS.API.STREAM.CREATE.EVENTS",
+            "$JS.API.STREAM.UPDATE.EVENTS",
+            "$JS.API.CONSUMER.INFO.EVENTS.evaluator",
+            "$JS.API.CONSUMER.INFO.EVENTS.operation-evaluator",
+            "$JS.API.CONSUMER.INFO.EVENTS.trace-outbox-acks",
+            "$JS.API.CONSUMER.INFO.EVENTS.operation-outbox-acks",
+            "$JS.API.CONSUMER.INFO.EVENTS.compliance-exceptions",
+            "$JS.API.CONSUMER.CREATE.EVENTS.evaluator.events.trace.ingested",
+            "$JS.API.CONSUMER.CREATE.EVENTS.operation-evaluator.events.operation.observed",
+            "$JS.API.CONSUMER.CREATE.EVENTS.trace-outbox-acks.events.trace.processed",
+            "$JS.API.CONSUMER.CREATE.EVENTS.operation-outbox-acks.events.operation.processed",
+            "$JS.API.CONSUMER.CREATE.EVENTS.compliance-exceptions.events.violation.created"
+        ],
+        "subscribe": [
+            "_INBOX.operator.>"
+        ]
+    }
+}

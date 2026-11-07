@@ -11,7 +11,6 @@ spec:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "nats") .) | indent 4 }}
   ports:
     - { name: client, port: 4222, targetPort: client }
-    - { name: monitor, port: 8222, targetPort: monitor }
 ---
 apiVersion: v1
 kind: Service
@@ -28,4 +27,3 @@ spec:
   ports:
     - { name: client, port: 4222, targetPort: client }
     - { name: cluster, port: 6222, targetPort: cluster }
-    - { name: monitor, port: 8222, targetPort: monitor }

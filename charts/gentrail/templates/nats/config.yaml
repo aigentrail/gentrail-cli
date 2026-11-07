@@ -1,25 +1,26 @@
+{{- $material := include "gentrail.natsMaterial" . | fromJson }}
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
 metadata:
-  name: nats
+  name: nats-server
   namespace: {{ .Release.Namespace }}
-  labels:
-{{ include "gentrail.labels" (merge (dict "component" "nats") .) | indent 4 }}
+  annotations:
+    gentrail.ai/credential-revision: {{ .Values.nats.credentialRevision | quote }}
+type: Opaque
 data:
-  nats.conf: |
-    port: 4222
-    http: 8222
-    jetstream {
-      store_dir: /data
-    }
-    {{- if gt (int .Values.nats.replicas) 1 }}
-    cluster {
-      name: gentrail
-      port: 6222
-      routes: [
-      {{- range $i := until (int .Values.nats.replicas) }}
-        nats://nats-{{ $i }}.nats-headless.{{ $.Release.Namespace }}.svc:6222
-      {{- end }}
-      ]
-    }
-    {{- end }}
+  nats.conf: {{ include "gentrail.natsConfig" . | b64enc | quote }}
+{{- range $key, $value := $material }}
+  {{ $key }}: {{ $value | b64enc | quote }}
+{{- end }}
+{{- range $role := list "authproxy" "evaluator" "dashboard" "headless" "operator" }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nats-{{ $role }}
+  namespace: {{ $.Release.Namespace }}
+type: Opaque
+data:
+  client.json: {{ dict "user" $role "password" (index $material (printf "%s.password" $role)) | toJson | b64enc | quote }}
+  ca.crt: {{ index $material "ca.crt" | b64enc | quote }}
+{{- end }}
