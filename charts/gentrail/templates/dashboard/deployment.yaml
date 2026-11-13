@@ -35,6 +35,29 @@ spec:
             - name: http
               containerPort: 8001
           env:
+            {{- if and .Values.headless.routeApplications .Values.headless.auditCapture.enabled }}
+            {{- if not .Values.dashboard.companySignIn }}
+            {{- fail "routed audit capture requires dashboard.companySignIn" }}
+            {{- end }}
+            - name: GENTRAIL_AUDIT_CAPTURE_OWNER
+              value: headless
+            {{- end }}
+            {{- if and .Values.headless.enabled (has "rules" .Values.headless.modules) (or .Values.headless.routeApplications .Values.headless.classification.enabled (has "observations" .Values.headless.modules)) }}
+            - name: GENTRAIL_REVERSIBILITY_OWNER
+              value: headless
+            {{- end }}
+            {{- if .Values.headless.classification.enabled }}
+            - name: GENTRAIL_CLASSIFICATION_OWNER
+              value: headless
+            {{- end }}
+            {{- if .Values.headless.credentialRecovery.enabled }}
+            - name: GENTRAIL_CREDENTIAL_RECOVERY_OWNER
+              value: headless
+            {{- end }}
+            {{- if .Values.headless.compliance.enabled }}
+            - name: GENTRAIL_COMPLIANCE_OWNER
+              value: headless
+            {{- end }}
             {{- if .Values.dashboard.companySignIn }}
             - name: AUTHENTICATION_CONFIG_FILE
               value: /var/run/gentrail/authentication/configuration/configuration.json
@@ -86,7 +109,10 @@ spec:
             - name: AIGENTRAIL_DASHBOARD_BASE_URL
               value: {{ .Values.dashboard.baseUrl | quote }}
             {{- end }}
-            {{- if .Values.dashboard.notificationsFrom }}
+            {{- if .Values.headless.notifications.enabled }}
+            - name: GENTRAIL_NOTIFICATION_DELIVERY_OWNER
+              value: headless
+            {{- else if .Values.dashboard.notificationsFrom }}
             - name: AIGENTRAIL_NOTIFICATIONS_SES_FROM
               value: {{ .Values.dashboard.notificationsFrom | quote }}
             {{- end }}

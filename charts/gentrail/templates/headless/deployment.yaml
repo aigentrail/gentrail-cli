@@ -1,9 +1,61 @@
 {{- $modules := .Values.headless.modules }}
+{{- $capture := .Values.headless.auditCapture.enabled }}
+{{- $cloud := or .Values.headless.notifications.enabled .Values.headless.classification.enabled $capture }}
+{{- if .Values.headless.useInstanceProfile }}
+{{- if or (ne .Values.mode "k3s") (not .Values.dashboard.useInstanceProfile) }}
+{{- fail "headless instance identity requires the standard k3s appliance identity" }}
+{{- end }}
+{{- if .Values.irsa.headless }}
+{{- fail "select either headless instance identity or irsa.headless" }}
+{{- end }}
+{{- end }}
+{{- if $capture }}
+{{- if not .Values.headless.companySignIn }}
+{{- fail "audit capture requires headless.companySignIn" }}
+{{- end }}
+{{- if not (index (.Values.image.references | default dict) "audit-capture-worker") }}
+{{- fail "audit capture requires image.references.audit-capture-worker pinned to a digest" }}
+{{- end }}
+{{- if eq .Values.headless.auditCapture.evidenceStorage "s3" }}
+{{- $_ := required "S3 audit capture requires s3.evidenceBucket" .Values.s3.evidenceBucket }}
+{{- end }}
+{{- $modules = uniq (concat $modules (list "integrations")) }}
+{{- end }}
+{{- if and .Values.headless.companySignIn (not .Values.headless.enabled) }}
+{{- fail "headless company sign-in requires headless.enabled" }}
+{{- end }}
+{{- if $cloud }}
+{{- if not .Values.headless.enabled }}
+{{- fail "headless cloud workers require headless.enabled" }}
+{{- end }}
+{{- if not .Values.headless.useInstanceProfile }}
+{{- $_ := required "headless cloud workers require an approved irsa.headless role" .Values.irsa.headless }}
+{{- end }}
+{{- end }}
+{{- if and .Values.headless.credentialRecovery.enabled (not .Values.headless.enabled) }}
+{{- fail "headless credential recovery requires headless.enabled" }}
+{{- end }}
+{{- if .Values.headless.compliance.enabled }}
+{{- if not .Values.headless.enabled }}
+{{- fail "headless compliance reactions require headless.enabled" }}
+{{- end }}
+{{- if not (has "findings" $modules) }}
+{{- fail "headless compliance reactions require findings" }}
+{{- end }}
+{{- end }}
+{{- if .Values.headless.notifications.enabled }}
+{{- if not .Values.headless.enabled }}
+{{- fail "headless notification delivery requires headless.enabled" }}
+{{- end }}
+{{- $_ := required "headless notification sender is required" .Values.headless.notifications.from }}
+{{- $_ := required "headless notification region is required" (default .Values.aws.region .Values.headless.notifications.region) }}
+
+{{- end }}
 {{- if .Values.headless.routeApplications }}
 {{- if not .Values.headless.enabled }}
 {{- fail "routing application APIs requires headless.enabled" }}
 {{- end }}
-{{- $modules = uniq (concat $modules (list "decisions" "observations")) }}
+{{- $modules = uniq (concat $modules (list "decisions" "observations" "integrations")) }}
 {{- range $required := list "rules" "policy" "policy-groups" "findings" "approvals" }}
 {{- if not (has $required $modules) }}
 {{- fail "dashboard application routing requires rules, policy, policy-groups, findings and approvals" }}
@@ -41,9 +93,15 @@ spec:
     metadata:
       annotations:
         checksum/nats-identity: {{ include "gentrail.natsMaterial" . | sha256sum }}
+{{- if and $capture (eq .Values.mode "eks") }}
+        eks.amazonaws.com/skip-containers: prepare-audit-directory,audit-capture-worker
+{{- end }}
       labels:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "headless") .) | indent 8 }}
     spec:
+{{- if $cloud }}
+      serviceAccountName: headless
+{{- end }}
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 60
       securityContext:
@@ -53,6 +111,26 @@ spec:
         fsGroup: 65532
         seccompProfile: { type: RuntimeDefault }
 {{ include "gentrail.imagePullSecrets" . | indent 6 }}
+{{- if $capture }}
+      initContainers:
+        - name: prepare-audit-directory
+          image: {{ include "gentrail.image" (merge (dict "component" "audit-capture-worker") .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [prepare-directory, --directory, /run/gentrail-capture, --user-id, "65532", --group-id, "65532"]
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL], add: [CHOWN] }
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          volumeMounts:
+            - name: audit-capture-runtime
+              mountPath: /run/gentrail-capture
+{{- end }}
       containers:
         - name: headless
           image: {{ include "gentrail.image" (merge (dict "component" "headless") .) }}
@@ -65,11 +143,70 @@ spec:
             - name: http
               containerPort: 8080
           env:
+{{- if $capture }}
+            - name: GENTRAIL_AUDIT_CAPTURE_DIRECTORY
+              value: /run/gentrail-capture
+            - name: GENTRAIL_INTEGRATION_RESTORATION
+              value: "true"
+            - name: GENTRAIL_EVIDENCE_RECOVERY
+              value: "true"
+            - name: GENTRAIL_SCAN_EVENT_DELIVERY
+              value: "true"
+            - name: GENTRAIL_EVIDENCE_STORAGE
+              value: {{ .Values.headless.auditCapture.evidenceStorage | quote }}
+{{- if eq .Values.headless.auditCapture.evidenceStorage "s3" }}
+            - name: EVIDENCE_BUCKET
+              value: {{ .Values.s3.evidenceBucket | quote }}
+{{- end }}
+{{- end }}
+{{- if .Values.headless.companySignIn }}
+            - name: AUTHENTICATION_CONFIG_FILE
+              value: /var/run/gentrail/authentication/configuration/configuration.json
+            - name: AUTHENTICATION_SECRETS_DIR
+              value: /var/run/gentrail/authentication/secrets
+{{- end }}
+{{- if .Values.headless.credentialRecovery.enabled }}
+            - name: GENTRAIL_CREDENTIAL_RECOVERY
+              value: "true"
+{{- end }}
+{{- if .Values.headless.compliance.enabled }}
+            - name: GENTRAIL_COMPLIANCE_REACTIONS
+              value: "true"
+{{- end }}
+{{- if .Values.headless.notifications.enabled }}
+            - name: GENTRAIL_NOTIFICATION_DELIVERY
+              value: ses
+            - name: AIGENTRAIL_NOTIFICATIONS_SES_FROM
+              value: {{ .Values.headless.notifications.from | quote }}
+            - name: AIGENTRAIL_NOTIFICATIONS_SES_REGION
+              value: {{ default .Values.aws.region .Values.headless.notifications.region | quote }}
+{{- end }}
+{{- if .Values.headless.classification.enabled }}
+            - name: GENTRAIL_TOOL_CLASSIFICATION
+              value: bedrock
+{{- if .Values.headless.classification.policySecretName }}
+            - name: GENTRAIL_AGENT_POLICY_FILE
+              value: /var/run/gentrail/classification/policy.json
+{{- end }}
+{{- end }}
+{{- if $cloud }}
+            - name: AWS_REGION
+              value: {{ required "headless cloud workers require a region" (ternary .Values.aws.region (default .Values.aws.region .Values.headless.notifications.region) (or .Values.headless.classification.enabled $capture)) | quote }}
+            - name: AWS_EC2_METADATA_DISABLED
+              value: {{ ternary "false" "true" .Values.headless.useInstanceProfile | quote }}
+{{- if and (eq .Values.mode "k3s") (not .Values.headless.useInstanceProfile) }}
+{{ include "gentrail.irsaEnv" .Values.irsa.headless | indent 12 }}
+{{- end }}
+{{- end }}
             - name: HEADLESS_LISTEN_ADDRESS
               value: "0.0.0.0:8080"
             - name: GENTRAIL_MODULES
               value: {{ join "," $modules | quote }}
-{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) }}
+{{- if and (has "approvals" $modules) .Values.dashboard.baseUrl }}
+            - name: AIGENTRAIL_DASHBOARD_BASE_URL
+              value: {{ .Values.dashboard.baseUrl | quote }}
+{{- end }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) $capture }}
 {{- include "gentrail.natsClientEnv" . | nindent 12 }}
             - name: NATS_URL
               value: "tls://nats:4222"
@@ -86,7 +223,7 @@ spec:
                   name: {{ .Values.headless.rulesDatabaseSecretName }}
                   key: {{ .Values.headless.rulesDatabaseSecretKey }}
 {{- end }}
-{{- if has "observations" $modules }}
+{{- if or (has "observations" $modules) .Values.headless.classification.enabled $capture }}
             - name: TRACES_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -106,12 +243,84 @@ spec:
             tcpSocket: { port: http }
             periodSeconds: 30
           volumeMounts:
-{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) }}
+{{- if $capture }}
+            - name: audit-capture-runtime
+              mountPath: /run/gentrail-capture
+{{- end }}
+{{- if .Values.headless.companySignIn }}
+            - name: headless-authentication-configuration
+              mountPath: /var/run/gentrail/authentication/configuration
+              readOnly: true
+            - name: headless-authentication-secrets
+              mountPath: /var/run/gentrail/authentication/secrets
+              readOnly: true
+{{- end }}
+{{- if and .Values.headless.classification.enabled .Values.headless.classification.policySecretName }}
+            - name: classification-policy
+              mountPath: /var/run/gentrail/classification
+              readOnly: true
+{{- end }}
+{{- if and $cloud (eq .Values.mode "k3s") (not .Values.headless.useInstanceProfile) }}
+{{ include "gentrail.irsaTokenMount" . | indent 12 }}
+{{- end }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) $capture }}
 {{- include "gentrail.natsClientMount" . | nindent 12 }}
 {{- end }}
 {{- include "gentrail.licenseMount" . | nindent 12 }}
+{{- if $capture }}
+        - name: audit-capture-worker
+          image: {{ include "gentrail.image" (merge (dict "component" "audit-capture-worker") .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.headless.databaseSecretName }}
+                  key: {{ .Values.headless.databaseSecretKey }}
+            - name: GENTRAIL_AUDIT_CAPTURE_DIRECTORY
+              value: /run/gentrail-capture
+            - name: GENTRAIL_AUDIT_CAPTURE_SERVER_UID
+              value: "65532"
+          resources: {{- toYaml .Values.headless.auditCapture.resources | nindent 12 }}
+          volumeMounts:
+            - name: audit-capture-runtime
+              mountPath: /run/gentrail-capture
+{{- end }}
       volumes:
-{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) }}
+{{- if $capture }}
+        - name: audit-capture-runtime
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+{{- end }}
+{{- if .Values.headless.companySignIn }}
+        - name: headless-authentication-configuration
+          configMap:
+            name: {{ .Values.headless.companySignIn.configurationMapName }}
+            items:
+              - key: configuration.json
+                path: configuration.json
+        - name: headless-authentication-secrets
+          secret:
+            secretName: {{ .Values.headless.companySignIn.clientSecretName }}
+            defaultMode: 288
+{{- end }}
+{{- if and .Values.headless.classification.enabled .Values.headless.classification.policySecretName }}
+        - name: classification-policy
+          secret:
+            secretName: {{ .Values.headless.classification.policySecretName | quote }}
+            items:
+              - key: policy.json
+                path: policy.json
+{{- end }}
+{{- if and $cloud (eq .Values.mode "k3s") (not .Values.headless.useInstanceProfile) }}
+{{ include "gentrail.irsaTokenVolume" . | indent 8 }}
+{{- end }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) $capture }}
 {{- include "gentrail.natsClientVolume" (dict "role" "headless") | nindent 8 }}
 {{- end }}
 {{- include "gentrail.licenseVolume" . | nindent 8 }}

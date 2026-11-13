@@ -40,6 +40,8 @@
     "dashboard": {
         "publish": [
             "$JS.API.STREAM.INFO.EVENTS",
+            "events.integration.updated",
+            "events.agent.updated",
             "events.rule.changed",
             "events.finding.changed.v1",
             "events.approval.changed.v1",
@@ -53,6 +55,8 @@
         ],
         "subscribe": [
             "_INBOX.dashboard.>",
+            "events.audit.changed.v1",
+            "events.integration.updated",
             "events.rule.changed",
             "events.finding.changed.v1",
             "events.violation.created",
@@ -66,14 +70,23 @@
     "headless": {
         "publish": [
             "$JS.API.STREAM.INFO.EVENTS",
+            "events.integration.updated",
+            "events.agent.updated",
             "events.rule.changed",
             "events.finding.changed.v1",
             "events.approval.changed.v1",
+            "events.scan.changed.v1",
             "events.enforcement.recorded",
-            "events.overview.changed.v1"
+            "events.overview.changed.v1",
+            "events.audit.changed.v1",
+            "$JS.API.CONSUMER.INFO.EVENTS.compliance-exceptions",
+            "$JS.API.CONSUMER.MSG.NEXT.EVENTS.compliance-exceptions",
+            "$JS.ACK.EVENTS.compliance-exceptions.>",
+            "$JS.ACK.*.*.EVENTS.compliance-exceptions.>"
         ],
         "subscribe": [
             "_INBOX.headless.>",
+            "events.integration.updated",
             "events.rule.changed",
             "events.finding.changed.v1",
             "events.violation.created",

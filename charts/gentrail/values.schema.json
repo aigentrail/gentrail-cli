@@ -18,6 +18,40 @@
         "resources"
       ],
       "properties": {
+        "useInstanceProfile": { "type": "boolean" },
+        "companySignIn": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/companySignIn" }] },
+        "auditCapture": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "evidenceStorage", "resources"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "evidenceStorage": { "type": "string", "enum": ["sql", "s3"] },
+            "resources": { "type": "object" }
+          }
+        },
+        "credentialRecovery": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled"], "properties": { "enabled": { "type": "boolean" } }
+        },
+        "compliance": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled"], "properties": { "enabled": { "type": "boolean" } }
+        },
+        "classification": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "policySecretName"],
+          "properties": { "enabled": {"type": "boolean"}, "policySecretName": {"type": "string", "maxLength": 253} }
+        },
+        "notifications": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "from", "region"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "from": { "type": "string", "maxLength": 320 },
+            "region": { "type": "string", "maxLength": 64 }
+          }
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -32,13 +66,14 @@
         "modules": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 7,
+          "maxItems": 8,
           "uniqueItems": true,
           "items": {
             "enum": [
               "rules",
               "policy",
               "policy-groups",
+              "integrations",
               "findings",
               "approvals",
               "decisions",
@@ -79,7 +114,7 @@
     "s3":      { "type": "object", "required": ["evidenceBucket"], "properties": { "evidenceBucket": { "type": "string" }, "traceArchiveBucket": { "type": "string" } } },
     "rds":     { "type": "object", "required": ["secretArn"], "properties": { "bootstrap": { "type": "boolean" }, "endpoint": { "type": "string" }, "instanceId": { "type": "string" }, "secretArn": { "type": "string" } } },
     "llm":     { "type": "object", "required": ["provider", "model"], "properties": { "provider": { "type": "string", "enum": ["bedrock", "openai"] }, "model": { "type": "string" } } },
-    "irsa":    { "type": "object", "required": ["dashboard", "policyEngine", "rdsBootstrap"], "properties": { "dashboard": { "type": "string" }, "policyEngine": { "type": "string" }, "rdsBootstrap": { "type": "string" } } },
+    "irsa":    { "type": "object", "required": ["dashboard", "policyEngine", "rdsBootstrap"], "properties": { "headless": { "type": "string", "pattern": "^(|arn:aws[a-z-]*:iam::[0-9]{12}:role/.+)$" }, "dashboard": { "type": "string" }, "policyEngine": { "type": "string" }, "rdsBootstrap": { "type": "string" } } },
     "license": { "type": "object", "required": ["secretRef"], "properties": { "secretRef": { "type": "string" } } }
   },
   "definitions": {

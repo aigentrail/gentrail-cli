@@ -264,10 +264,8 @@ Parameters:
     Default: "us.openai.gpt-6.1-terra"
     Description: >
       Bedrock model the policy engine invokes. GPT-6.1 Terra uses the US
-      cross-region inference profile by default. A CustomResource checks it at
-      stack-create and WARNS
-      (advisory, non-blocking) if it is not yet enabled in this account/region.
-      Enable model access before using the policy engine.
+      cross-region inference profile by default. Model agreement activation and
+      workload inference are checked separately by gentrail ai after core installation.
 
   BedrockFoundationModelId:
     Type: String
@@ -1269,8 +1267,8 @@ Resources:
                 Effect: Allow
                 Action: bedrock:InvokeModel
                 Resource:
-                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.openai.gpt-6.1-terra"
-                  - "arn:aws:bedrock:*::foundation-model/openai.gpt-6.1-terra"
+                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0"
+                  - "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
       Tags:
         - { Key: gentrail:service-account, Value: dashboard }
 
@@ -1308,6 +1306,7 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}"
                   - !Sub "arn:aws:bedrock:*::foundation-model/${BedrockFoundationModelId}"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:project/default"
       Tags:
         - { Key: gentrail:service-account, Value: policy-engine }
 
@@ -1705,76 +1704,6 @@ Resources:
   # in the Helm chart - NOT here. For HTTPS, pass ExistingAcmCertArn (a BYO ACM
   # cert); point your own DNS at the ALB post-install (a one-line aws CLI command
   # in the runbook). CFN manages no Route 53 zones, records, or certs.
-
-  # ── Bedrock-model validator ──────────────────────────────────────
-  BedrockValidatorRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: bedrock-list-models
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:ListFoundationModels
-                  - bedrock:ListInferenceProfiles
-                Resource: "*"
-
-  BedrockValidatorFn:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub "${ClusterName}-bedrock-validator"
-      Runtime: python3.12
-      # Inline ZipFile lands as `index.py` in the Lambda env, so the Handler must
-      # be `index.handler`, not `handler.handler`.
-      Handler: index.handler
-      Role: !GetAtt BedrockValidatorRole.Arn
-      Timeout: 30
-      Code:
-        ZipFile: |
-          import json, urllib.request, boto3
-          def _r(e, c, s, r):
-              b = json.dumps({"Status": s, "Reason": r, "PhysicalResourceId": e.get("PhysicalResourceId") or c.log_stream_name, "StackId": e["StackId"], "RequestId": e["RequestId"], "LogicalResourceId": e["LogicalResourceId"], "Data": {}}).encode()
-              urllib.request.urlopen(urllib.request.Request(e["ResponseURL"], data=b, method="PUT", headers={"Content-Type": "", "Content-Length": str(len(b))})).read()
-          def handler(e, c):
-              if e["RequestType"] == "Delete":
-                  return _r(e, c, "SUCCESS", "delete-noop")
-              m, r = e["ResourceProperties"]["BedrockModelId"], e["ResourceProperties"]["Region"]
-              # A region prefix (us./eu./apac.) marks a cross-region inference
-              # profile, which lives in a different API than foundation models.
-              is_profile = m.split(".", 1)[0] in ("us", "eu", "apac")
-              # Advisory only: a model-access gap must not block substrate
-              # provisioning. The policy engine is the sole Bedrock consumer and is
-              # enabled separately, so surface a WARNING in the stack events (visible
-              # on the CustomResource) instead of FAILING the whole stack.
-              try:
-                  bc = boto3.client("bedrock", region_name=r)
-                  if is_profile:
-                      ids = {p["inferenceProfileId"] for p in bc.list_inference_profiles()["inferenceProfileSummaries"]}
-                  else:
-                      ids = {x["modelId"] for x in bc.list_foundation_models()["modelSummaries"]}
-              except Exception as ex:
-                  return _r(e, c, "SUCCESS", f"WARNING: could not verify Bedrock access in {r} ({ex}); enable model access before using the policy engine")
-              if m not in ids:
-                  kind = "inference profile" if is_profile else "model"
-                  return _r(e, c, "SUCCESS", f"WARNING: Bedrock {kind} {m!r} not available in {r}; enable model access before using the policy engine. First 5: {sorted(ids)[:5]}")
-              _r(e, c, "SUCCESS", f"model {m} available in {r}")
-
-  BedrockModelValidation:
-    Type: Custom::BedrockModelValidator
-    Properties:
-      ServiceToken: !GetAtt BedrockValidatorFn.Arn
-      BedrockModelId: !Ref BedrockModelId
-      Region: !Ref AWS::Region
 
   # ── In-cluster bootstrap ───────────────────────────────────────────────
   # An ephemeral node that runs the chart install in the customer account and

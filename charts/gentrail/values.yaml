@@ -19,10 +19,10 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.13.3
+  tag: v0.13.4-rc.3
   pullPolicy: IfNotPresent
   pullSecret: ""
-  references: {"authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:60e91b5fb29c1f84bd314d12fbe064583c76f54eae79dce2012d5fcac90ce5e3","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:e4e9ad94e3e5459572946e90c169190cb1f9f31e5fc6a94e74a0bc9e7335a561","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:d3835a59adeca534cd02c04e959e6191e93932fce32bcbd1f3691461685a7352","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:f2b9dc4a5668eca35d7b628adc8f43f16a83f73836a97e0608a39c617f9eb8f1","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:07636058860a7032558e7fe984574c7febb8db43ef3dfc5c1a33ce4770b8c184","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:72e3e1749e55d45e66b9056d6be8cb12006cf0b9ce2d84b1a755435974df8309"}
+  references: {"audit-capture-worker":"public.ecr.aws/p6a2v1k1/audit-capture-worker@sha256:66ac27f886842e2406df0ec4e8997f6c7cd5c4155334f7df8716078c6e694332","authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:518afa15d3f8550842b606c2cf26d9acd46ce58827f1eb5159b6fc8a2e65423d","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:c3dac3c5f57231443135d6057087574a7b646942fbd4b5fb4bd7bbf6775e8855","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:63261862097af734fcec19d22a89979449941d544afc8335674e8077e0425512","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:7497c588f9a8da757abebc3fed1ee719a6c12e730660d779dd3c3277ae3314d8","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:9057841038ea0374cf2173dcd6ae774ece8e91028057fe080a80455b4f131f7f","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:c877ad5fb140f77f07150d01a6eb115fc1cef906a5b5931ac99f9c41942ae547"}
 ingress:
   # Set by the production bootstrap from the substrate outputs: CloudFormation
   # owns the load balancers, the chart only binds pods into their target groups.
@@ -64,6 +64,7 @@ llm:
   provider: bedrock
   model: "us.openai.gpt-6.1-terra"
 irsa:
+  headless: ""
   dashboard: ""
   policyEngine: ""
   rdsBootstrap: ""
@@ -79,7 +80,26 @@ license:
   jwt: ""
 headless:
   enabled: false
+  useInstanceProfile: false
+  companySignIn: null
+  auditCapture:
+    enabled: false
+    evidenceStorage: s3
+    resources:
+      requests: {cpu: 25m, memory: 64Mi}
+      limits: {cpu: 500m, memory: 256Mi}
   routeApplications: false
+  credentialRecovery:
+    enabled: false
+  compliance:
+    enabled: false
+  classification:
+    enabled: false
+    policySecretName: ""
+  notifications:
+    enabled: false
+    from: ""
+    region: "" # Defaults to aws.region.
   replicaCount: 1
   modules: [rules, policy, policy-groups, findings, approvals]
   databaseSecretName: gentrail-rds-secret

@@ -9,6 +9,8 @@ dashboard:
   replicaCount: 1
   useInstanceProfile: true
   selfHosted: true
+headless:
+  useInstanceProfile: true
 policyEngine:
   enabled: false
 nats:
