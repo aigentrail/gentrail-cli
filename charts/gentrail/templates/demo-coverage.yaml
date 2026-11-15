@@ -28,6 +28,8 @@ spec:
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
             seccompProfile: {type: RuntimeDefault}
           {{- if .Values.demoWorkload.imagePullSecret }}
           imagePullSecrets:
@@ -55,7 +57,13 @@ spec:
 {{ toYaml .Values.demoWorkload.resources | indent 16 }}
               volumeMounts:
                 - {name: config, mountPath: /config, readOnly: true}
+                - {name: agent-keys, mountPath: /var/run/gentrail/agent-keys, readOnly: true}
           volumes:
+            - name: agent-keys
+              secret:
+                secretName: {{ .Values.demoWorkload.apiKeySecretName }}
+                defaultMode: 0440
+                items: [{key: agent-keys.json, path: keys.json}]
             - name: config
               configMap: {name: demo-workload}
 {{- end }}
