@@ -10,16 +10,6 @@ Interrupted Standard updates keep running in AWS; reconnect using the printed
 operator machine, which must remain connected until completion or rollback.
 Windows ARM64 uses the verified x64 Helm tool through Windows emulation.
 
-### First D3 upgrade
-
-`v0.14.0-rc.1` establishes a new deployment baseline. For an older deployment,
-stop here: the rolling upgrade commands below do not perform this transition.
-An operator must stop incompatible writers and executors, drain or invalidate
-pending work, provision agent-bound decision credentials, and qualify the new
-clients before restoring traffic. Old approvals cannot satisfy new obligations.
-After the D3 schema marker is installed, do not roll back to a pre-D3 binary;
-preserve records and use a forward fix. Fresh installations can use D3 directly.
-
 The manual procedure below is for operators using Helm. Updating the CLI or changing
 a CloudFormation `RepoBranch` parameter does not update the running application.
 The commands below use Helm 3 and the default release and namespace, `gentrail`.
@@ -84,7 +74,7 @@ license material. Record the current revision for recovery.
 umask 077
 mkdir gentrail-upgrade
 cd gentrail-upgrade
-TARGET_VERSION=v0.14.0-rc.1
+TARGET_VERSION=v0.13.5
 helm get values gentrail --namespace gentrail -o yaml > current-values.yaml
 helm history gentrail --namespace gentrail > history-before.txt
 git clone --depth 1 --branch "$TARGET_VERSION" \
@@ -101,7 +91,7 @@ version if you chose another release:
 
 ```yaml
 image:
-  tag: v0.14.0-rc.1
+  tag: v0.13.5
 ```
 
 If `image.references` contains digest-pinned overrides, update each enabled

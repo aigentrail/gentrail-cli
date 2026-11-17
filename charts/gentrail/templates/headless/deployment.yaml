@@ -1,9 +1,3 @@
-{{- $compositionJSON := .Files.Get "files/headless-composition.json" }}
-{{- $composition := $compositionJSON | mustFromJson }}
-{{- $compositionSHA256 := $compositionJSON | sha256sum }}
-{{- if ne (toJson $composition.version) "1" }}
-{{- fail "unsupported headless composition contract version" }}
-{{- end }}
 {{- $modules := .Values.headless.modules }}
 {{- $capture := .Values.headless.auditCapture.enabled }}
 {{- $cloud := or .Values.headless.notifications.enabled .Values.headless.classification.enabled $capture }}
@@ -25,7 +19,7 @@
 {{- if eq .Values.headless.auditCapture.evidenceStorage "s3" }}
 {{- $_ := required "S3 audit capture requires s3.evidenceBucket" .Values.s3.evidenceBucket }}
 {{- end }}
-{{- $modules = uniq (concat $modules $composition.auditCapture.adds) }}
+{{- $modules = uniq (concat $modules (list "integrations")) }}
 {{- end }}
 {{- if and .Values.headless.companySignIn (not .Values.headless.enabled) }}
 {{- fail "headless company sign-in requires headless.enabled" }}
@@ -45,6 +39,9 @@
 {{- if not .Values.headless.enabled }}
 {{- fail "headless compliance reactions require headless.enabled" }}
 {{- end }}
+{{- if not (has "findings" $modules) }}
+{{- fail "headless compliance reactions require findings" }}
+{{- end }}
 {{- end }}
 {{- if .Values.headless.notifications.enabled }}
 {{- if not .Values.headless.enabled }}
@@ -58,78 +55,25 @@
 {{- if not .Values.headless.enabled }}
 {{- fail "routing application APIs requires headless.enabled" }}
 {{- end }}
-{{- $modules = uniq (concat $modules $composition.dashboardRouting.adds) }}
-{{- range $required := $composition.dashboardRouting.requires }}
+{{- $modules = uniq (concat $modules (list "decisions" "observations" "integrations")) }}
+{{- range $required := list "rules" "policy" "policy-groups" "findings" "approvals" }}
 {{- if not (has $required $modules) }}
 {{- fail "dashboard application routing requires rules, policy, policy-groups, findings and approvals" }}
 {{- end }}
 {{- end }}
 {{- end }}
 {{- if .Values.headless.enabled }}
-{{- $resources := dict }}
-{{- if ne (toJson $composition.foundation.version) "1" }}
-{{- fail "unsupported headless foundation contract version" }}
-{{- end }}
-{{- range $resource := $composition.foundation.resources }}
-{{- $_ := set $resources $resource true }}
-{{- end }}
-{{- $workers := list }}
-{{- if $capture }}
-{{- $workers = concat $workers (list "audit-capture" "integration-restoration" "scan-events") }}
-{{- end }}
-{{- if .Values.headless.classification.enabled }}
-{{- $workers = append $workers "classification" }}
-{{- end }}
-{{- if .Values.headless.credentialRecovery.enabled }}
-{{- $workers = append $workers "credential-recovery" }}
-{{- end }}
-{{- if .Values.headless.compliance.enabled }}
-{{- $workers = append $workers "compliance" }}
-{{- end }}
-{{- if .Values.headless.notifications.enabled }}
-{{- $workers = append $workers "notifications" }}
-{{- end }}
-{{- range $worker := $workers }}
-{{- if not (hasKey $composition.workers $worker) }}
-{{- fail (printf "unknown headless worker %s" $worker) }}
-{{- end }}
-{{- $contract := index $composition.workers $worker }}
-{{- if ne (toJson $contract.version) "1" }}
-{{- fail (printf "unsupported headless worker version for %s" $worker) }}
-{{- end }}
-{{- range $required := $contract.workers }}
-{{- if not (has $required $workers) }}
-{{- fail (printf "headless worker %s requires worker %s" $worker $required) }}
-{{- end }}
-{{- end }}
-{{- range $required := $contract.requires }}
-{{- if not (has $required $modules) }}
-{{- fail (printf "headless worker %s requires %s" $worker $required) }}
-{{- end }}
-{{- end }}
-{{- range $resource := $contract.resources }}
-{{- $_ := set $resources $resource true }}
-{{- end }}
-{{- end }}
 {{- if not (index (.Values.image.references | default dict) "headless") }}
 {{- fail "enabled headless requires image.references.headless pinned to a digest" }}
 {{- end }}
-{{- range $module := $modules }}
-{{- if not (hasKey $composition.modules $module) }}
-{{- fail (printf "unknown headless module %s" $module) }}
-{{- end }}
-{{- range $resource := (index $composition.modules $module).resources }}
-{{- $_ := set $resources $resource true }}
-{{- end }}
-{{- range $required := (index $composition.modules $module).requires }}
-{{- if not (has $required $modules) }}
-{{- fail (printf "headless module %s requires %s" $module $required) }}
-{{- end }}
+{{- if or (has "policy" $modules) (has "policy-groups" $modules) }}
+{{- if not (has "rules" $modules) }}
+{{- fail "headless policy and policy-groups require rules" }}
 {{- end }}
 {{- end }}
 {{- if has "decisions" $modules }}
-{{- if or (ne .Values.headless.databaseSecretName .Values.headless.rulesDatabaseSecretName) (ne .Values.headless.databaseSecretKey .Values.headless.rulesDatabaseSecretKey) }}
-{{- fail "execution admission requires application and rule storage to use the same database secret and key" }}
+{{- if or (not (has "rules" $modules)) (not (has "approvals" $modules)) }}
+{{- fail "headless decisions require rules and approvals" }}
 {{- end }}
 {{- end }}
 apiVersion: apps/v1
@@ -148,7 +92,6 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/composition: {{ $compositionSHA256 }}
         checksum/nats-identity: {{ include "gentrail.natsMaterial" . | sha256sum }}
 {{- if and $capture (eq .Values.mode "eks") }}
         eks.amazonaws.com/skip-containers: prepare-audit-directory,audit-capture-worker
@@ -259,32 +202,28 @@ spec:
               value: "0.0.0.0:8080"
             - name: GENTRAIL_MODULES
               value: {{ join "," $modules | quote }}
-            - name: GENTRAIL_COMPOSITION_SHA256
-              value: {{ $compositionSHA256 | quote }}
 {{- if and (has "approvals" $modules) .Values.dashboard.baseUrl }}
             - name: AIGENTRAIL_DASHBOARD_BASE_URL
               value: {{ .Values.dashboard.baseUrl | quote }}
 {{- end }}
-{{- if hasKey $resources "broker" }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) $capture }}
 {{- include "gentrail.natsClientEnv" . | nindent 12 }}
             - name: NATS_URL
               value: "tls://nats:4222"
 {{- end }}
-{{- if hasKey $resources "application_sql" }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.headless.databaseSecretName }}
                   key: {{ .Values.headless.databaseSecretKey }}
-{{- end }}
-{{- if hasKey $resources "rules_sql" }}
+{{- if has "rules" $modules }}
             - name: RULES_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.headless.rulesDatabaseSecretName }}
                   key: {{ .Values.headless.rulesDatabaseSecretKey }}
 {{- end }}
-{{- if hasKey $resources "traces_sql" }}
+{{- if or (has "observations" $modules) .Values.headless.classification.enabled $capture }}
             - name: TRACES_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -324,7 +263,7 @@ spec:
 {{- if and $cloud (eq .Values.mode "k3s") (not .Values.headless.useInstanceProfile) }}
 {{ include "gentrail.irsaTokenMount" . | indent 12 }}
 {{- end }}
-{{- if hasKey $resources "broker" }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) $capture }}
 {{- include "gentrail.natsClientMount" . | nindent 12 }}
 {{- end }}
 {{- include "gentrail.licenseMount" . | nindent 12 }}
@@ -381,7 +320,7 @@ spec:
 {{- if and $cloud (eq .Values.mode "k3s") (not .Values.headless.useInstanceProfile) }}
 {{ include "gentrail.irsaTokenVolume" . | indent 8 }}
 {{- end }}
-{{- if hasKey $resources "broker" }}
+{{- if or (has "rules" $modules) (has "findings" $modules) (has "approvals" $modules) $capture }}
 {{- include "gentrail.natsClientVolume" (dict "role" "headless") | nindent 8 }}
 {{- end }}
 {{- include "gentrail.licenseVolume" . | nindent 8 }}

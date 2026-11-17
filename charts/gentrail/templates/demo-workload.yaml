@@ -87,14 +87,8 @@ spec:
 {{ toYaml .Values.demoWorkload.resources | indent 12 }}
           volumeMounts:
             - {name: config, mountPath: /config, readOnly: true}
-            - {name: agent-keys, mountPath: /var/run/gentrail/agent-keys, readOnly: true}
             - {name: state, mountPath: /state}
       volumes:
-        - name: agent-keys
-          secret:
-            secretName: {{ .Values.demoWorkload.apiKeySecretName }}
-            defaultMode: 0440
-            items: [{key: agent-keys.json, path: keys.json}]
         - name: config
           configMap: {name: demo-workload}
         - name: state
