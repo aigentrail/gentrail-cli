@@ -21,8 +21,6 @@ docsServer:
   enabled: false
 sidecar:
   enabled: false
-agentChat:
-  enabled: false
 marketingConsole:
   enabled: false
 metabaseSync:
