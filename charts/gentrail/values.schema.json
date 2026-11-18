@@ -19,7 +19,19 @@
       ],
       "properties": {
         "useInstanceProfile": { "type": "boolean" },
+        "auditRefresh": { "type": "object", "additionalProperties": false, "required": ["enabled"], "properties": { "enabled": { "type": "boolean" } } },
+        "auditRecovery": { "type": "object", "additionalProperties": false, "required": ["enabled"], "properties": { "enabled": { "type": "boolean" } } },
+        "auditMonitoring": { "type": "object", "additionalProperties": false, "required": ["enabled"], "properties": { "enabled": { "type": "boolean" } } },
+        "scheduledScans": { "type": "object", "additionalProperties": false, "required": ["enabled"], "properties": { "enabled": { "type": "boolean" } } },
         "companySignIn": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/companySignIn" }] },
+        "integrationCommands": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "ingestionEndpoint"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "ingestionEndpoint": { "type": "string", "maxLength": 2048 }
+          }
+        },
         "auditCapture": {
           "type": "object", "additionalProperties": false,
           "required": ["enabled", "evidenceStorage", "resources"],

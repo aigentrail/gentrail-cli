@@ -444,6 +444,24 @@
             "pending": "preserve-domain-state",
             "authorities": []
         },
+        "manual-scans": {
+            "version": 1,
+            "requires": [
+                "rules"
+            ],
+            "resources": [],
+            "workers": [
+                "integration-commands",
+                "scan-events",
+                "evidence-recovery"
+            ],
+            "bindings": [
+                "human-auth"
+            ],
+            "shutdown": "cancel-and-join",
+            "pending": "preserve-domain-state",
+            "authorities": []
+        },
         "registry-drift": {
             "version": 1,
             "requires": [],
@@ -475,7 +493,9 @@
             "workers": [
                 "integration-restoration"
             ],
-            "bindings": [],
+            "bindings": [
+                "ingestion-endpoint"
+            ],
             "shutdown": "cancel-and-join",
             "pending": "preserve-domain-state",
             "authorities": []

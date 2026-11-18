@@ -178,7 +178,7 @@ spec:
       ports:
         - {protocol: TCP, port: 80}
 {{- end }}
-{{- if or .Values.headless.notifications.enabled .Values.headless.classification.enabled .Values.headless.auditCapture.enabled .Values.headless.companySignIn }}
+{{- if or .Values.headless.notifications.enabled .Values.headless.classification.enabled .Values.headless.auditCapture.enabled .Values.headless.integrationCommands.enabled .Values.headless.companySignIn .Values.headless.auditRecovery.enabled .Values.headless.scheduledScans.enabled }}
     - ports:
         - { protocol: TCP, port: 443 }
 {{- end }}

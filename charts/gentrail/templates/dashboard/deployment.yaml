@@ -35,9 +35,31 @@ spec:
             - name: http
               containerPort: 8001
           env:
+            {{- range $selection := list (dict "selected" $.Values.headless.auditRefresh.enabled "variable" "GENTRAIL_AUDIT_REFRESH_OWNER") (dict "selected" $.Values.headless.auditRecovery.enabled "variable" "GENTRAIL_AUDIT_RECOVERY_OWNER") }}
+            {{- if and $.Values.headless.routeApplications $selection.selected }}
+            - name: {{ $selection.variable }}
+              value: headless
+            {{- end }}
+            {{- end }}
+            {{- range $selection := list (dict "selected" .Values.headless.auditMonitoring.enabled "variable" "GENTRAIL_AUDIT_SCHEDULE_OWNER") (dict "selected" .Values.headless.scheduledScans.enabled "variable" "GENTRAIL_SCAN_SCHEDULE_OWNER") }}
+            {{- if $selection.selected }}
+            - name: {{ $selection.variable }}
+              value: headless
+            {{- end }}
+            {{- end }}
+            {{- if or .Values.headless.auditCapture.enabled .Values.headless.auditRecovery.enabled .Values.headless.scheduledScans.enabled (and .Values.headless.integrationCommands.enabled (has "rules" .Values.headless.modules) (or .Values.headless.companySignIn (hasPrefix "https://" .Values.dashboard.baseUrl))) }}
+            - name: GENTRAIL_SCAN_EVENTS_OWNER
+              value: headless
+            - name: GENTRAIL_SCAN_EVIDENCE_OWNER
+              value: headless
+            {{- end }}
+            {{- if hasPrefix "https://" .Values.dashboard.baseUrl }}
+            - name: AUTHENTICATION_ORIGIN
+              value: {{ .Values.dashboard.baseUrl | quote }}
+            {{- end }}
             {{- if and .Values.headless.routeApplications .Values.headless.auditCapture.enabled }}
-            {{- if not .Values.dashboard.companySignIn }}
-            {{- fail "routed audit capture requires dashboard.companySignIn" }}
+            {{- if and (not .Values.dashboard.companySignIn) (not (hasPrefix "https://" .Values.dashboard.baseUrl)) }}
+            {{- fail "routed audit capture requires shared company sign-in or an HTTPS dashboard base URL" }}
             {{- end }}
             - name: GENTRAIL_AUDIT_CAPTURE_OWNER
               value: headless
@@ -50,12 +72,12 @@ spec:
             - name: GENTRAIL_CLASSIFICATION_OWNER
               value: headless
             {{- end }}
-            {{- if .Values.headless.credentialRecovery.enabled }}
-            - name: GENTRAIL_CREDENTIAL_RECOVERY_OWNER
+            {{- if and .Values.headless.routeApplications .Values.headless.integrationCommands.enabled }}
+            - name: GENTRAIL_INTEGRATION_COMMANDS_OWNER
               value: headless
             {{- end }}
-            {{- if .Values.headless.compliance.enabled }}
-            - name: GENTRAIL_COMPLIANCE_OWNER
+            {{- if .Values.headless.credentialRecovery.enabled }}
+            - name: GENTRAIL_CREDENTIAL_RECOVERY_OWNER
               value: headless
             {{- end }}
             {{- if .Values.dashboard.companySignIn }}

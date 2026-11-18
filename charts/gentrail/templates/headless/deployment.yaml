@@ -6,7 +6,39 @@
 {{- end }}
 {{- $modules := .Values.headless.modules }}
 {{- $capture := .Values.headless.auditCapture.enabled }}
-{{- $cloud := or .Values.headless.notifications.enabled .Values.headless.classification.enabled $capture }}
+{{- $integrationCommands := .Values.headless.integrationCommands.enabled }}
+{{- $recovery := .Values.headless.auditRecovery.enabled }}
+{{- $scheduled := .Values.headless.scheduledScans.enabled }}
+{{- if and (or .Values.headless.auditRefresh.enabled .Values.headless.auditMonitoring.enabled $recovery $scheduled) (not .Values.headless.enabled) }}
+{{- fail "audit and scan workers require headless.enabled" }}
+{{- end }}
+{{- if and (or .Values.headless.auditRefresh.enabled $recovery) (not .Values.headless.companySignIn) (not (hasPrefix "https://" .Values.dashboard.baseUrl)) }}
+{{- fail "audit commands require shared company sign-in or an HTTPS dashboard base URL" }}
+{{- end }}
+{{- if or $recovery $scheduled }}
+{{- $modules = uniq (append $modules "integrations") }}
+{{- end }}
+{{- $cloud := or .Values.headless.notifications.enabled .Values.headless.classification.enabled $capture $integrationCommands $recovery $scheduled }}
+{{- if and .Values.headless.enabled .Values.headless.routeApplications .Values.dashboard.enabled (hasPrefix "https://" .Values.dashboard.baseUrl) }}
+{{- if ne (toJson .Values.dashboard.companySignIn) (toJson .Values.headless.companySignIn) }}
+{{- fail "routed human authentication requires the same company sign-in configuration" }}
+{{- end }}
+{{- end }}
+{{- if $integrationCommands }}
+{{- if not (has "integrations" $modules) }}
+{{- fail "integration commands require the integrations module" }}
+{{- end }}
+{{- $_ := required "integration commands require an ingestion endpoint" .Values.headless.integrationCommands.ingestionEndpoint }}
+{{- if and .Values.dashboard.enabled .Values.headless.routeApplications }}
+{{- if or .Values.dashboard.companySignIn .Values.headless.companySignIn }}
+{{- if ne (toJson .Values.dashboard.companySignIn) (toJson .Values.headless.companySignIn) }}
+{{- fail "routed integration commands require the same company sign-in configuration" }}
+{{- end }}
+{{- else if not (hasPrefix "https://" .Values.dashboard.baseUrl) }}
+{{- fail "routed integration commands require shared company sign-in or an HTTPS dashboard base URL" }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if .Values.headless.useInstanceProfile }}
 {{- if or (ne .Values.mode "k3s") (not .Values.dashboard.useInstanceProfile) }}
 {{- fail "headless instance identity requires the standard k3s appliance identity" }}
@@ -16,8 +48,8 @@
 {{- end }}
 {{- end }}
 {{- if $capture }}
-{{- if not .Values.headless.companySignIn }}
-{{- fail "audit capture requires headless.companySignIn" }}
+{{- if and (not .Values.headless.companySignIn) (not (hasPrefix "https://" .Values.dashboard.baseUrl)) }}
+{{- fail "audit capture requires shared company sign-in or an HTTPS dashboard base URL" }}
 {{- end }}
 {{- if not (index (.Values.image.references | default dict) "audit-capture-worker") }}
 {{- fail "audit capture requires image.references.audit-capture-worker pinned to a digest" }}
@@ -26,6 +58,17 @@
 {{- $_ := required "S3 audit capture requires s3.evidenceBucket" .Values.s3.evidenceBucket }}
 {{- end }}
 {{- $modules = uniq (concat $modules $composition.auditCapture.adds) }}
+{{- end }}
+{{- $manualScans := and $integrationCommands (or .Values.headless.companySignIn (hasPrefix "https://" .Values.dashboard.baseUrl)) (has "rules" $modules) }}
+{{- $scanEvidence := or $capture $manualScans $recovery $scheduled }}
+{{- if and $scheduled (eq .Values.headless.auditCapture.evidenceStorage "s3") }}
+{{- $_ := required "S3 scheduled scans require s3.evidenceBucket" .Values.s3.evidenceBucket }}
+{{- end }}
+{{- if and $recovery (eq .Values.headless.auditCapture.evidenceStorage "s3") }}
+{{- $_ := required "S3 audit recovery requires s3.evidenceBucket" .Values.s3.evidenceBucket }}
+{{- end }}
+{{- if and $manualScans (not $capture) (eq .Values.headless.auditCapture.evidenceStorage "s3") }}
+{{- $_ := required "S3 manual scans require s3.evidenceBucket" .Values.s3.evidenceBucket }}
 {{- end }}
 {{- if and .Values.headless.companySignIn (not .Values.headless.enabled) }}
 {{- fail "headless company sign-in requires headless.enabled" }}
@@ -74,8 +117,25 @@
 {{- $_ := set $resources $resource true }}
 {{- end }}
 {{- $workers := list }}
+{{- range $selection := list (dict "selected" .Values.headless.auditRefresh.enabled "worker" "audit-refresh") (dict "selected" .Values.headless.auditMonitoring.enabled "worker" "audit-monitoring") (dict "selected" $recovery "worker" "audit-recovery") (dict "selected" $scheduled "worker" "scheduled-scans") }}
+{{- if $selection.selected }}
+{{- $workers = append $workers $selection.worker }}
+{{- end }}
+{{- end }}
+{{- if or $recovery $scheduled }}
+{{- $workers = append $workers "integration-restoration" }}
+{{- end }}
+{{- if or $recovery $scheduled }}
+{{- $workers = concat $workers (list "scan-events" "evidence-recovery") }}
+{{- end }}
+{{- if $integrationCommands }}
+{{- $workers = concat $workers (list "integration-restoration" "integration-commands") }}
+{{- end }}
+{{- if $manualScans }}
+{{- $workers = concat $workers (list "manual-scans" "scan-events" "evidence-recovery") }}
+{{- end }}
 {{- if $capture }}
-{{- $workers = concat $workers (list "audit-capture" "integration-restoration" "scan-events") }}
+{{- $workers = concat $workers (list "audit-capture" "integration-restoration" "scan-events" "evidence-recovery") }}
 {{- end }}
 {{- if .Values.headless.classification.enabled }}
 {{- $workers = append $workers "classification" }}
@@ -89,6 +149,7 @@
 {{- if .Values.headless.notifications.enabled }}
 {{- $workers = append $workers "notifications" }}
 {{- end }}
+{{- $workers = uniq $workers }}
 {{- range $worker := $workers }}
 {{- if not (hasKey $composition.workers $worker) }}
 {{- fail (printf "unknown headless worker %s" $worker) }}
@@ -200,12 +261,36 @@ spec:
             - name: http
               containerPort: 8080
           env:
+{{- if hasPrefix "https://" .Values.dashboard.baseUrl }}
+            - name: AUTHENTICATION_ORIGIN
+              value: {{ .Values.dashboard.baseUrl | quote }}
+{{- end }}
 {{- if $capture }}
             - name: GENTRAIL_AUDIT_CAPTURE_DIRECTORY
               value: /run/gentrail-capture
+{{- end }}
+{{- range $selection := list (dict "selected" .Values.headless.auditRefresh.enabled "variable" "GENTRAIL_AUDIT_REFRESH") (dict "selected" .Values.headless.auditMonitoring.enabled "variable" "GENTRAIL_AUDIT_MONITORING") (dict "selected" $recovery "variable" "GENTRAIL_AUDIT_RECOVERY") (dict "selected" $scheduled "variable" "GENTRAIL_SCHEDULED_SCANS") }}
+{{- if $selection.selected }}
+            - name: {{ $selection.variable }}
+              value: "true"
+{{- end }}
+{{- end }}
+{{- if or $capture $integrationCommands $recovery $scheduled }}
             - name: GENTRAIL_INTEGRATION_RESTORATION
               value: "true"
-            - name: GENTRAIL_EVIDENCE_RECOVERY
+{{- end }}
+{{- if $integrationCommands }}
+            - name: GENTRAIL_INTEGRATION_COMMANDS
+              value: "true"
+            - name: AIGENTRAIL_INGESTION_ENDPOINT
+              value: {{ .Values.headless.integrationCommands.ingestionEndpoint | quote }}
+{{- end }}
+{{- if $manualScans }}
+            - name: GENTRAIL_MANUAL_SCANS
+              value: "true"
+{{- end }}
+{{- if $scanEvidence }}
+            - name: GENTRAIL_SCAN_EVIDENCE_RECOVERY
               value: "true"
             - name: GENTRAIL_SCAN_EVENT_DELIVERY
               value: "true"
@@ -248,7 +333,7 @@ spec:
 {{- end }}
 {{- if $cloud }}
             - name: AWS_REGION
-              value: {{ required "headless cloud workers require a region" (ternary .Values.aws.region (default .Values.aws.region .Values.headless.notifications.region) (or .Values.headless.classification.enabled $capture)) | quote }}
+              value: {{ required "headless cloud workers require a region" (ternary .Values.aws.region (default .Values.aws.region .Values.headless.notifications.region) (or .Values.headless.classification.enabled $capture $integrationCommands $recovery $scheduled)) | quote }}
             - name: AWS_EC2_METADATA_DISABLED
               value: {{ ternary "false" "true" .Values.headless.useInstanceProfile | quote }}
 {{- if and (eq .Values.mode "k3s") (not .Values.headless.useInstanceProfile) }}

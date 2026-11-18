@@ -19,10 +19,10 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.14.0-rc.5
+  tag: v0.14.0-rc.8
   pullPolicy: IfNotPresent
   pullSecret: ""
-  references: {"audit-capture-worker":"public.ecr.aws/p6a2v1k1/audit-capture-worker@sha256:66ac27f886842e2406df0ec4e8997f6c7cd5c4155334f7df8716078c6e694332","authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:dd56859b7f5d06ae3401fc73f32e59d3d70a9bddc6777cff559967f0b3cd10ca","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:f51dec34dfd729e623e607714f84f3cb7eca1a772e5d496427a40b2033bcc7ff","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:ebc1728e9127b9dcec1db1494ea22a6c369699850a1e49a9aca8d1e4d4ce620c","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:7cac1667c2c5a854d6b7725f044e1552f86689b99cfaea80f50bea9424e6f4ba","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:cca03cee8f7e97c4d6a938d520af99e28d1d0ea358e3ca21cfd13baa6c3fd4a3","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:12111973d08c93d86add5991b309b296f086e944def8345fbd7edaaadf2fb290"}
+  references: {"audit-capture-worker":"public.ecr.aws/p6a2v1k1/audit-capture-worker@sha256:82d116ec8932e6c0e7820f8baaced292a12f92983ac43e731d0f40a72c331710","authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:b10ba51b0c61bd4bc74be1159942037552b79c2a5c703e21897bd8481bf647a7","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:a68d2a1aa5167a73e7ede775bbdb2d86b00e2842011a1290f7b22fe32cf82157","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:ca0104bbf303a0cbc88818f179a67e173bef750213b47c96cf72bb7a2878db25","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:9f05f6ca764a768fbc65ab3077e87caeff9edf63bfe17d48d589b4d3293ef318","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:fd4bcf5b9f2b63ee72a084a92e999eb15040edaa2e64c2ed2f47265823b38d72","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:c4f2de8918a72896081107b1dd410a6499a339b04c52b2cd24aa794e5764bb10"}
 ingress:
   # Set by the production bootstrap from the substrate outputs: CloudFormation
   # owns the load balancers, the chart only binds pods into their target groups.
@@ -81,6 +81,13 @@ headless:
   enabled: false
   useInstanceProfile: false
   companySignIn: null
+  auditRefresh: {enabled: false}
+  auditRecovery: {enabled: false}
+  auditMonitoring: {enabled: false}
+  scheduledScans: {enabled: false}
+  integrationCommands:
+    enabled: false
+    ingestionEndpoint: ""
   auditCapture:
     enabled: false
     evidenceStorage: s3

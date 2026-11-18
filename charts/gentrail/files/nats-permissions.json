@@ -47,11 +47,7 @@
             "events.approval.changed.v1",
             "events.scan.changed.v1",
             "events.enforcement.recorded",
-            "events.overview.changed.v1",
-            "$JS.API.CONSUMER.INFO.EVENTS.compliance-exceptions",
-            "$JS.API.CONSUMER.MSG.NEXT.EVENTS.compliance-exceptions",
-            "$JS.ACK.EVENTS.compliance-exceptions.>",
-            "$JS.ACK.*.*.EVENTS.compliance-exceptions.>"
+            "events.overview.changed.v1"
         ],
         "subscribe": [
             "_INBOX.dashboard.>",
