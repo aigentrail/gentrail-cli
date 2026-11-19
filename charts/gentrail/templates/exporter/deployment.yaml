@@ -34,6 +34,8 @@ spec:
           image: {{ include "gentrail.image" (merge (dict "component" "exporter") .) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
             - name: AWS_REGION
               value: {{ .Values.aws.region | quote }}
             - name: EXPORT_TARGET

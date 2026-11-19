@@ -172,12 +172,7 @@ spec:
       ports:
         - { protocol: TCP, port: 8080 }
   egress:
-{{- if .Values.headless.useInstanceProfile }}
-    - to:
-        - ipBlock: {cidr: 169.254.169.254/32}
-      ports:
-        - {protocol: TCP, port: 80}
-{{- end }}
+
 {{- if or .Values.headless.notifications.enabled .Values.headless.classification.enabled .Values.headless.auditCapture.enabled .Values.headless.integrationCommands.enabled .Values.headless.companySignIn .Values.headless.auditRecovery.enabled .Values.headless.scheduledScans.enabled }}
     - ports:
         - { protocol: TCP, port: 443 }
@@ -432,29 +427,8 @@ spec:
         - {protocol: TCP, port: 6443}
         - {protocol: UDP, port: 53}
         - {protocol: TCP, port: 53}
-    - to:
-        - ipBlock: {cidr: 169.254.169.254/32}
-      ports:
-        - {protocol: TCP, port: 80}
 {{- end }}
-{{- if and .Values.networkPolicies.enabled .Values.dashboard.useInstanceProfile }}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: dashboard-instance-credentials
-  namespace: {{ .Release.Namespace }}
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/component: dashboard
-  policyTypes: [Egress]
-  egress:
-    - to:
-        - ipBlock: {cidr: 169.254.169.254/32}
-      ports:
-        - {protocol: TCP, port: 80}
-{{- end }}
+
 
 {{- if .Values.networkPolicies.enabled }}
 ---

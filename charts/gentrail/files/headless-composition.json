@@ -543,13 +543,13 @@
         "classification": {
             "provider": "bedrock",
             "actions": [
-                "bedrock:InvokeModel"
+                "bedrock-mantle:CreateInference"
             ],
             "bindings": [
                 "aws_region",
                 "account_id",
                 "classification_model_id",
-                "classification_foundation_model_id"
+                "classification_fallback_model_id"
             ]
         },
         "notifications": {

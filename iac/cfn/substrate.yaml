@@ -48,10 +48,6 @@ Metadata:
           - ExistingAcmCertArn
           - EnableAlbAccessLogs
           - TlsPolicy
-      - Label: { default: "LLM" }
-        Parameters:
-          - BedrockModelId
-          - BedrockFoundationModelId
       - Label: { default: "Observability" }
         Parameters:
           - CloudWatchLogsRetentionDays
@@ -259,22 +255,6 @@ Parameters:
     Default: gentrail
     AllowedPattern: "^[A-Za-z0-9!_.*()-]+(/[A-Za-z0-9!_.*()-]+)*$"
     Description: Key prefix the export writes under, without leading or trailing slashes.
-  BedrockModelId:
-    Type: String
-    Default: "us.openai.gpt-6.1-terra"
-    Description: >
-      Bedrock model the policy engine invokes. GPT-6.1 Terra uses the US
-      cross-region inference profile by default. Model agreement activation and
-      workload inference are checked separately by gentrail ai after core installation.
-
-  BedrockFoundationModelId:
-    Type: String
-    Default: "openai.gpt-6.1-terra"
-    Description: >
-      The foundation model behind BedrockModelId (strip the region prefix). Used
-      only to scope the policy engine's bedrock:InvokeModel IAM to the models the
-      inference profile routes to. Keep in step with BedrockModelId.
-
   # ── Observability ──────────────────────────────────────────────────────
   CloudWatchLogsRetentionDays:
     Type: Number
@@ -1265,10 +1245,13 @@ Resources:
                 Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/gentrail-readonly-${AWS::Region}"
               - Sid: BedrockClassify
                 Effect: Allow
-                Action: bedrock:InvokeModel
-                Resource:
-                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0"
-                  - "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+                Action: bedrock-mantle:CreateInference
+                Resource: !Sub "arn:${AWS::Partition}:bedrock-mantle:${AWS::Region}:${AWS::AccountId}:project/default"
+                Condition:
+                  StringEquals:
+                    bedrock-mantle:Model:
+                      - openai.gpt-oss-120b
+                      - openai.gpt-oss-20b
       Tags:
         - { Key: gentrail:service-account, Value: dashboard }
 
@@ -1298,15 +1281,14 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # A cross-region inference profile needs InvokeModel on both the
-              # profile and the foundation models it routes to (region wildcard
-              # covers every region the profile spans).
               - Effect: Allow
-                Action: bedrock:InvokeModel
-                Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}"
-                  - !Sub "arn:aws:bedrock:*::foundation-model/${BedrockFoundationModelId}"
-                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:project/default"
+                Action: bedrock-mantle:CreateInference
+                Resource: !Sub "arn:${AWS::Partition}:bedrock-mantle:${AWS::Region}:${AWS::AccountId}:project/default"
+                Condition:
+                  StringEquals:
+                    bedrock-mantle:Model:
+                      - openai.gpt-oss-120b
+                      - openai.gpt-oss-20b
       Tags:
         - { Key: gentrail:service-account, Value: policy-engine }
 
@@ -1881,7 +1863,6 @@ Resources:
                 secretArn: ${RdsMasterSecret}
               llm:
                 provider: bedrock
-                model: ${BedrockModelId}
               irsa:
                 dashboard: ${DashboardIrsaRole.Arn}
                 policyEngine: ${PolicyEngineIrsaRole.Arn}
@@ -1985,9 +1966,6 @@ Outputs:
 
   OtelHostname:
     Value: !Ref OtelHostname
-
-  BedrockModelId:
-    Value: !Ref BedrockModelId
 
   # IRSA role ARNs (Helm chart annotations)
   DashboardIrsaRoleArn:    { Value: !GetAtt DashboardIrsaRole.Arn }

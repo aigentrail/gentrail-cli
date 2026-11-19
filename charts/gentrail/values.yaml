@@ -19,10 +19,10 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.14.0-rc.8
+  tag: v0.14.0-rc.15
   pullPolicy: IfNotPresent
   pullSecret: ""
-  references: {"audit-capture-worker":"public.ecr.aws/p6a2v1k1/audit-capture-worker@sha256:82d116ec8932e6c0e7820f8baaced292a12f92983ac43e731d0f40a72c331710","authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:b10ba51b0c61bd4bc74be1159942037552b79c2a5c703e21897bd8481bf647a7","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:a68d2a1aa5167a73e7ede775bbdb2d86b00e2842011a1290f7b22fe32cf82157","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:ca0104bbf303a0cbc88818f179a67e173bef750213b47c96cf72bb7a2878db25","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:9f05f6ca764a768fbc65ab3077e87caeff9edf63bfe17d48d589b4d3293ef318","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:fd4bcf5b9f2b63ee72a084a92e999eb15040edaa2e64c2ed2f47265823b38d72","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:c4f2de8918a72896081107b1dd410a6499a339b04c52b2cd24aa794e5764bb10"}
+  references: {"audit-capture-worker":"public.ecr.aws/p6a2v1k1/audit-capture-worker@sha256:82d116ec8932e6c0e7820f8baaced292a12f92983ac43e731d0f40a72c331710","authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:de906fcdf3c4d8ff7c269e5a75b6b14fb743622923d885fbc4d60b7755819b31","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:f635fa1ca6a174941547f1dbb2ae1678247126d9c395563596465789715183bc","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:515a0fa0ca00f07d84f2b13edff4c61eaa5407d3630be6897f796dee74620d65","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:48657cb4c6667187c0a58f9a6426e1751b1f09e1c09886d04e29b72bb674b142","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:0cb8eac32c166093f1049ec1af556611cd40b57caf727444b552c7d772206da7","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:2a8911266ddd32648cbb25beb98db3fae0f8c92dc02d90f119f3343b8142241a"}
 ingress:
   # Set by the production bootstrap from the substrate outputs: CloudFormation
   # owns the load balancers, the chart only binds pods into their target groups.
@@ -62,7 +62,8 @@ cloudflared:
   tokenSecretRef: gentrail-cloudflared
 llm:
   provider: bedrock
-  model: "us.openai.gpt-6.1-terra"
+  # Used only by the OpenAI provider; Bedrock selects GPT-OSS models automatically.
+  model: ""
 irsa:
   headless: ""
   dashboard: ""
@@ -79,7 +80,6 @@ license:
   jwt: ""
 headless:
   enabled: false
-  useInstanceProfile: false
   companySignIn: null
   auditRefresh: {enabled: false}
   auditRecovery: {enabled: false}
@@ -123,7 +123,6 @@ dashboard:
   companySignIn: null
   piiKmsKeyArn: ""
   piiKmsRegion: ""
-  useInstanceProfile: false
   replicaCount: 2
   # Set false to run a read-only dashboard (no heartbeat/evidence writes) when
   # a second stack shares this RDS during an incremental cutover.
@@ -158,12 +157,9 @@ dashboard:
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: 500m, memory: 512Mi}
-# policy-engine now speaks Bedrock (llm.provider/llm.model below; IRSA grants
-# bedrock:InvokeModel). Enable it by setting replicaCount: 1 once the configured
-# model is granted access in the account/region - the substrate's validator
-# checks availability, but Bedrock model access is a separate console opt-in.
-# The dashboard works without it; AI policy extraction is the only feature it
-# powers.
+# Optional extraction uses automatic GPT-OSS 120B/20B through Mantle with the
+# workload's scoped IAM grant. Set replicaCount: 1 to run this service.
+# The dashboard works without it; this service powers AI policy extraction.
 policyEngine:
   enabled: true
   replicaCount: 0

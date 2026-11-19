@@ -35,6 +35,8 @@ spec:
             - name: http
               containerPort: 8001
           env:
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
             {{- range $selection := list (dict "selected" $.Values.headless.auditRefresh.enabled "variable" "GENTRAIL_AUDIT_REFRESH_OWNER") (dict "selected" $.Values.headless.auditRecovery.enabled "variable" "GENTRAIL_AUDIT_RECOVERY_OWNER") }}
             {{- if and $.Values.headless.routeApplications $selection.selected }}
             - name: {{ $selection.variable }}

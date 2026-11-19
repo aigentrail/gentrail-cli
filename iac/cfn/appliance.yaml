@@ -75,6 +75,7 @@ Conditions:
   # <<< GENERATED pii-kms-conditions
   HasLicense: !Not [!Equals [!Ref LicenseJwt, ""]]
   HasTunnel: !Not [!Equals [!Ref TunnelToken, ""]]
+  SelfInstallEnabled: !Equals [!Ref SelfInstall, "true"]
 Resources:
   # >>> GENERATED pii-kms-policy
   PiiTokenizationKey:
@@ -101,7 +102,7 @@ Resources:
     Properties:
       PolicyName: pii-tokenization
       Roles:
-        - Ref: NodeRole
+        - Ref: DashboardIrsaRole
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -268,31 +269,146 @@ Resources:
     Properties:
       Description: Gentrail standard tunnel connector credential
       SecretString: !Ref TunnelToken
-  ApplicationStoragePolicy:
+  OidcBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+  OidcBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref OidcBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource:
+              - !Sub '${OidcBucket.Arn}/.well-known/openid-configuration'
+              - !Sub '${OidcBucket.Arn}/openid/v1/jwks'
+  WorkloadOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    DependsOn: [OidcBucketPolicy, Node]
+    Properties:
+      Url: !Sub 'https://${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix}'
+      ClientIdList: [sts.amazonaws.com]
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-workloads'}]
+  NodeBootstrapPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: standard-storage
+      PolicyName: standard-bootstrap
       Roles: [!Ref NodeRole]
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Action: secretsmanager:GetSecretValue
-            Resource: !If
-              - HasTunnel
-              - [!GetAtt RdsInstance.MasterUserSecret.SecretArn, !Ref TunnelSecret]
-              - [!GetAtt RdsInstance.MasterUserSecret.SecretArn]
-          - Effect: Allow
-            Action: ['s3:ListBucket', 's3:GetBucketLocation']
-            Resource: [!GetAtt EvidenceBucket.Arn, !GetAtt TraceArchiveBucket.Arn]
-          - Effect: Allow
-            Action: ['s3:GetObject', 's3:GetObjectVersion', 's3:PutObject', 's3:PutObjectRetention']
-            Resource: [!Sub '${EvidenceBucket.Arn}/*', !Sub '${TraceArchiveBucket.Arn}/*']
-          - Effect: Allow
-            Action: bedrock:InvokeModel
+            Action: s3:PutObject
             Resource:
-              - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0'
-              - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0'
+              - !Sub '${OidcBucket.Arn}/.well-known/openid-configuration'
+              - !Sub '${OidcBucket.Arn}/openid/v1/jwks'
+          - Effect: Allow
+            Action: cloudformation:DescribeStackResource
+            Resource: !Ref AWS::StackId
+          - !If
+            - HasTunnel
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref TunnelSecret
+            - !Ref AWS::NoValue
+  DashboardIrsaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${WorkloadOidcProvider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"${IssuerHost}:sub":"system:serviceaccount:gentrail:dashboard","${IssuerHost}:aud":"sts.amazonaws.com"}}}]}'
+          - IssuerHost: !Sub '${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix}'
+      Policies:
+        - PolicyName: workload
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-mantle:CreateInference
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock-mantle:${AWS::Region}:${AWS::AccountId}:project/default'
+                Condition:
+                  StringEquals:
+                    bedrock-mantle:Model:
+                      - openai.gpt-oss-120b
+                      - openai.gpt-oss-20b
+              - Effect: Allow
+                Action: ['s3:ListBucket', 's3:GetBucketLocation']
+                Resource: [!GetAtt EvidenceBucket.Arn, !GetAtt TraceArchiveBucket.Arn]
+              - Effect: Allow
+                Action: ['s3:GetObject', 's3:GetObjectVersion', 's3:PutObject', 's3:PutObjectRetention']
+                Resource: [!Sub '${EvidenceBucket.Arn}/*', !Sub '${TraceArchiveBucket.Arn}/*']
+  HeadlessIrsaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${WorkloadOidcProvider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"${IssuerHost}:sub":"system:serviceaccount:gentrail:headless","${IssuerHost}:aud":"sts.amazonaws.com"}}}]}'
+          - IssuerHost: !Sub '${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix}'
+      Policies:
+        - PolicyName: workload
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-mantle:CreateInference
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock-mantle:${AWS::Region}:${AWS::AccountId}:project/default'
+                Condition:
+                  StringEquals:
+                    bedrock-mantle:Model:
+                      - openai.gpt-oss-120b
+                      - openai.gpt-oss-20b
+              - Effect: Allow
+                Action: ['s3:ListBucket', 's3:GetBucketLocation']
+                Resource: [!GetAtt EvidenceBucket.Arn, !GetAtt TraceArchiveBucket.Arn]
+              - Effect: Allow
+                Action: ['s3:GetObject', 's3:GetObjectVersion', 's3:PutObject', 's3:PutObjectRetention']
+                Resource: [!Sub '${EvidenceBucket.Arn}/*', !Sub '${TraceArchiveBucket.Arn}/*']
+  PolicyEngineIrsaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${WorkloadOidcProvider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"${IssuerHost}:sub":"system:serviceaccount:gentrail:policy-engine","${IssuerHost}:aud":"sts.amazonaws.com"}}}]}'
+          - IssuerHost: !Sub '${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix}'
+      Policies:
+        - PolicyName: workload
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-mantle:CreateInference
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock-mantle:${AWS::Region}:${AWS::AccountId}:project/default'
+                Condition:
+                  StringEquals:
+                    bedrock-mantle:Model:
+                      - openai.gpt-oss-120b
+                      - openai.gpt-oss-20b
+  RdsBootstrapIrsaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${WorkloadOidcProvider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"${IssuerHost}:sub":"system:serviceaccount:gentrail:rds-secret-bootstrap","${IssuerHost}:aud":"sts.amazonaws.com"}}}]}'
+          - IssuerHost: !Sub '${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix}'
+      Policies:
+        - PolicyName: workload
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !GetAtt RdsInstance.MasterUserSecret.SecretArn
   NodeRole:
     Type: AWS::IAM::Role
     Properties:
@@ -311,7 +427,7 @@ Resources:
       Roles: [!Ref NodeRole]
   Node:
     Type: AWS::EC2::Instance
-    DependsOn: [DashboardPiiKmsPolicy, ApplicationStoragePolicy, PublicSubnetRouteTableAssociation, PublicDefaultRoute]
+    DependsOn: [NodeBootstrapPolicy, OidcBucketPolicy, PublicSubnetRouteTableAssociation, PublicDefaultRoute]
     Properties:
       ImageId: !Ref LatestAl2023Ami
       InstanceType: !Ref InstanceType
@@ -319,7 +435,7 @@ Resources:
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds: [!Ref NodeSecurityGroup]
       MetadataOptions:
-        HttpPutResponseHopLimit: 2
+        HttpPutResponseHopLimit: 1
         HttpTokens: required
         HttpEndpoint: enabled
       BlockDeviceMappings:
@@ -343,15 +459,37 @@ Resources:
             trap 'signal 1' ERR
 
             # k3s single-node server; traefik + servicelb disabled to mirror the dev
-            # recipe, local-path-provisioner stays for the PVCs. No IRSA apiserver args.
+            # recipe, local-path-provisioner stays for the PVCs. OIDC keys are public;
+            # signing keys stay on the encrypted node volume.
             # systemd-resolved's stub resolv.conf (127.0.0.53) makes coredns loop-detect and
             # crash-loop (breaking cluster DNS), so point k3s at the real uplink resolv.conf.
             RESOLV=""
             [ -f /run/systemd/resolve/resolv.conf ] && RESOLV="--resolv-conf /run/systemd/resolve/resolv.conf"
             curl -sfL https://get.k3s.io | \
-              INSTALL_K3S_EXEC="server --disable traefik --disable servicelb --write-kubeconfig-mode 0644 $RESOLV" sh -
+              INSTALL_K3S_EXEC="server --disable traefik --disable servicelb --write-kubeconfig-mode 0600 --kube-apiserver-arg=service-account-issuer=https://${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix} --kube-apiserver-arg=service-account-jwks-uri=https://${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix}/openid/v1/jwks $RESOLV" sh -
             until k3s kubectl get --raw /readyz >/dev/null 2>&1; do sleep 2; done
             export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+            # Refresh public verification keys on every k3s restart, including
+            # after signing-key rotation. Publication failure fails the restart.
+            cat > /usr/local/bin/gentrail-publish-oidc <<'OIDC'
+            #!/bin/bash
+            set -euo pipefail
+            export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+            for attempt in $(seq 1 90); do
+              if k3s kubectl get --raw /openid/v1/jwks > /run/gentrail-jwks.json; then break; fi
+              sleep 2
+            done
+            test -s /run/gentrail-jwks.json
+            printf '%s' '{"issuer":"https://${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix}","jwks_uri":"https://${OidcBucket}.s3.${AWS::Region}.${AWS::URLSuffix}/openid/v1/jwks","authorization_endpoint":"urn:kubernetes:programmatic_authorization","response_types_supported":["id_token"],"subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"]}' > /run/gentrail-openid-configuration
+            aws s3 cp /run/gentrail-jwks.json 's3://${OidcBucket}/openid/v1/jwks' --content-type application/json --region ${AWS::Region}
+            aws s3 cp /run/gentrail-openid-configuration 's3://${OidcBucket}/.well-known/openid-configuration' --content-type application/json --region ${AWS::Region}
+            OIDC
+            chmod 700 /usr/local/bin/gentrail-publish-oidc
+            mkdir -p /etc/systemd/system/k3s.service.d
+            printf '[Service]\nExecStartPost=/usr/local/bin/gentrail-publish-oidc\n' > /etc/systemd/system/k3s.service.d/oidc.conf
+            systemctl daemon-reload
+            /usr/local/bin/gentrail-publish-oidc
 
             # k3s applies its bundled add-ons just after /readyz, and local-path-provisioner
             # can crash-loop if it starts before the pod network settles, leaving every PVC
@@ -394,6 +532,10 @@ Resources:
             set -euo pipefail
             export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
             CHART=/opt/gentrail/src/charts/gentrail
+            DASHBOARD_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id DashboardIrsaRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
+            HEADLESS_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id HeadlessIrsaRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
+            EXTRACTOR_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id PolicyEngineIrsaRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
+            BOOTSTRAP_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id RdsBootstrapIrsaRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
             TUNNEL_SET=""
             if [ -s /opt/gentrail/tunnel.token ]; then
               k3s kubectl -n gentrail create secret generic gentrail-cloudflared --from-file=token=/opt/gentrail/tunnel.token --dry-run=client -o yaml | k3s kubectl apply -f -
@@ -401,22 +543,39 @@ Resources:
             fi
             LICENSE_SET=""
             if [ -f /opt/gentrail/license.jwt ]; then LICENSE_SET="--set-file license.jwt=/opt/gentrail/license.jwt"; fi
-            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set dashboard.useInstanceProfile=true $LICENSE_SET $TUNNEL_SET --wait --wait-for-jobs --timeout 15m
+            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set irsa.dashboard=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$DASHBOARD_ROLE --set irsa.headless=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$HEADLESS_ROLE --set irsa.policyEngine=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$EXTRACTOR_ROLE --set irsa.rdsBootstrap=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$BOOTSTRAP_ROLE $LICENSE_SET $TUNNEL_SET --wait --wait-for-jobs --timeout 15m
             INSTALL
             chmod 600 /opt/gentrail/fetch.sh /opt/gentrail/install.sh
 
-            # signal fires after the scripts in true mode and after bare k3s in false
-            # mode (the CLI then drives fetch/install over SSM); local-path is already
-            # Available above either way, so helm --wait can bind the StatefulSet PVCs.
-            if [ "${SelfInstall}" = "true" ]; then
-              bash /opt/gentrail/fetch.sh
-              bash /opt/gentrail/install.sh
-            fi
-
+            # The issuer cannot be registered until its discovery document
+            # exists. Signal bare-node readiness first, then CFN creates roles.
             trap - ERR
             signal 0
+            if [ "${SelfInstall}" = "true" ]; then
+              application_signal() {
+                set +x
+                /opt/aws/bin/cfn-signal --exit-code "$1" '${ApplicationReadySignal}'
+              }
+              trap 'application_signal 1' ERR
+              READY=false
+              for attempt in $(seq 1 120); do
+                READY=true
+                for resource in DashboardPiiKmsPolicy DashboardIrsaRole HeadlessIrsaRole PolicyEngineIrsaRole RdsBootstrapIrsaRole; do
+                  STATE=$(aws cloudformation describe-stack-resource --stack-name '${AWS::StackName}' --logical-resource-id "$resource" --region ${AWS::Region} --query StackResourceDetail.ResourceStatus --output text 2>/dev/null || true)
+                  if [ "$STATE" != CREATE_COMPLETE ]; then READY=false; fi
+                done
+                if [ "$READY" = true ]; then break; fi
+                sleep 5
+              done
+              test "$READY" = true
+              bash /opt/gentrail/fetch.sh
+              bash /opt/gentrail/install.sh
+              application_signal 0
+              trap - ERR
+            fi
             echo "gentrail appliance bootstrap complete (SelfInstall=${SelfInstall})"
-          - PiiTokenizationKeyArn: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
+          - ApplicationReadySignal: !If [SelfInstallEnabled, !Ref ApplicationReadyHandle, ""]
+            PiiTokenizationKeyArn: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
             PiiTokenizationKeyRegion: !If [CreatePiiTokenizationKey, !Ref 'AWS::Region', !Select [3, !Split [':', !Ref ExistingPiiTokenizationKeyArn]]]
             TunnelWrite: !If
               - HasTunnel
@@ -430,6 +589,17 @@ Resources:
       ResourceSignal:
         Timeout: PT20M
         Count: 1
+  ApplicationReadyHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Condition: SelfInstallEnabled
+  ApplicationReady:
+    Type: AWS::CloudFormation::WaitCondition
+    Condition: SelfInstallEnabled
+    DependsOn: [DashboardPiiKmsPolicy, HeadlessIrsaRole, PolicyEngineIrsaRole, RdsBootstrapIrsaRole]
+    Properties:
+      Handle: !Ref ApplicationReadyHandle
+      Timeout: '1200'
+      Count: 1
 Outputs:
   PiiTokenizationKeyArn:
     Value: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
@@ -448,3 +618,6 @@ Outputs:
     Value: !Ref EvidenceBucket
   TraceArchiveBucketName:
     Value: !Ref TraceArchiveBucket
+  OidcBucketName:
+    Description: Public OIDC verification documents; cleared automatically before teardown.
+    Value: !Ref OidcBucket

@@ -7,10 +7,10 @@ storage:
   class: ""
 dashboard:
   replicaCount: 1
-  useInstanceProfile: true
   selfHosted: true
 headless:
-  useInstanceProfile: true
+  enabled: true
+  routeApplications: true
 policyEngine:
   enabled: false
 nats:

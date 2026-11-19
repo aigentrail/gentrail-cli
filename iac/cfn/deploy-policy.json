@@ -2,52 +2,6 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "HaikuModelAccess",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:GetFoundationModelAvailability",
-        "bedrock:ListFoundationModelAgreementOffers",
-        "bedrock:CreateFoundationModelAgreement"
-      ],
-      "Resource": "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
-    },
-    {
-      "Sid": "AnthropicUseCaseRegistration",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:GetUseCaseForModelAccess",
-        "bedrock:PutUseCaseForModelAccess"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "HaikuSubscriptionFromBedrock",
-      "Effect": "Allow",
-      "Action": "aws-marketplace:Subscribe",
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "aws:CalledViaLast": "bedrock.amazonaws.com"
-        },
-        "ForAnyValue:StringEquals": {
-          "aws-marketplace:ProductId": [
-            "prod-xdkflymybwmvi"
-          ]
-        }
-      }
-    },
-    {
-      "Sid": "SubscriptionStatusFromBedrock",
-      "Effect": "Allow",
-      "Action": "aws-marketplace:ViewSubscriptions",
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "aws:CalledViaLast": "bedrock.amazonaws.com"
-        }
-      }
-    },
-    {
       "Sid": "GentrailStackServices",
       "Effect": "Allow",
       "Action": [
@@ -138,7 +92,7 @@
       "Resource": "arn:aws:iam::*:instance-profile/gentrail*"
     },
     {
-      "Sid": "EksOidcProvider",
+      "Sid": "GentrailOidcProviders",
       "Effect": "Allow",
       "Action": [
         "iam:CreateOpenIDConnectProvider",
@@ -149,7 +103,10 @@
         "iam:TagOpenIDConnectProvider",
         "iam:UntagOpenIDConnectProvider"
       ],
-      "Resource": "arn:aws:iam::*:oidc-provider/oidc.eks.*.amazonaws.com/id/*"
+      "Resource": [
+        "arn:aws:iam::*:oidc-provider/oidc.eks.*.amazonaws.com/id/*",
+        "arn:aws:iam::*:oidc-provider/gentrail*-oidcbucket-*.s3.*.amazonaws.com"
+      ]
     },
     {
       "Sid": "ServiceLinkedRoles",

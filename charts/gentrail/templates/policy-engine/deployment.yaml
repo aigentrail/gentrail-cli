@@ -31,12 +31,16 @@ spec:
             - name: http
               containerPort: 8100
           env:
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
             - name: AWS_REGION
               value: {{ .Values.aws.region | quote }}
             - name: LLM_PROVIDER
               value: {{ .Values.llm.provider | quote }}
+            {{- if eq .Values.llm.provider "openai" }}
             - name: LLM_MODEL
-              value: {{ .Values.llm.model | quote }}
+              value: {{ .Values.llm.model | default "gpt-4o" | quote }}
+            {{- end }}
 {{- include "gentrail.licenseEnv" . | nindent 12 }}
             {{- if and .Values.irsa.policyEngine (eq .Values.mode "k3s") }}
 {{- include "gentrail.irsaEnv" .Values.irsa.policyEngine | nindent 12 }}
