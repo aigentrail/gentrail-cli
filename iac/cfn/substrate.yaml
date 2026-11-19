@@ -1287,8 +1287,8 @@ Resources:
                 Condition:
                   StringEquals:
                     bedrock-mantle:Model:
-                      - openai.gpt-oss-120b
-                      - openai.gpt-oss-20b
+                      - nvidia.nemotron-super-3-120b
+                      - google.gemma-4-31b
       Tags:
         - { Key: gentrail:service-account, Value: policy-engine }
 
