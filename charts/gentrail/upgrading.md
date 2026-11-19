@@ -84,7 +84,7 @@ license material. Record the current revision for recovery.
 umask 077
 mkdir gentrail-upgrade
 cd gentrail-upgrade
-TARGET_VERSION=v0.14.0-rc.19
+TARGET_VERSION=v0.14.0-rc.20
 helm get values gentrail --namespace gentrail -o yaml > current-values.yaml
 helm history gentrail --namespace gentrail > history-before.txt
 git clone --depth 1 --branch "$TARGET_VERSION" \
@@ -101,7 +101,7 @@ version if you chose another release:
 
 ```yaml
 image:
-  tag: v0.14.0-rc.19
+  tag: v0.14.0-rc.20
 ```
 
 If `image.references` contains digest-pinned overrides, update each enabled
