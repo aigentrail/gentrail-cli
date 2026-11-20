@@ -2,6 +2,15 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Gentrail standard installation: ARM64 k3s on one EC2 node, private managed PostgreSQL, retained S3 evidence with Object Lock, and SSM access. Single-AZ application and database; no EKS, NAT gateway or load balancer.
 Parameters:
+  AgentVpcId:
+    Type: String
+    Default: ""
+    AllowedPattern: ^$|^vpc-([0-9a-f]{8}|[0-9a-f]{17})$
+    Description: Optional same-account, same-region agent VPC. Empty associates the new Gentrail VPC only.
+  LatticePrefixListId:
+    Type: String
+    AllowedPattern: ^pl-[0-9a-f]+$
+    Description: Regional AWS-managed VPC Lattice prefix list, resolved automatically by the CLI.
   # >>> GENERATED pii-kms-parameters
   ExistingPiiTokenizationKeyArn:
     Type: String
@@ -67,6 +76,7 @@ Parameters:
     # network, so coredns loop-detects, dies, and cluster DNS goes down.
     Default: 10.20.0.0/16
 Conditions:
+  HasAgentVpc: !Not [!Equals [!Ref AgentVpcId, ""]]
   # >>> GENERATED pii-kms-conditions
   CreatePiiTokenizationKey:
     Fn::Equals:
@@ -163,13 +173,23 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
-  # Egress-only: the box pulls k3s, the chart, and images outbound and is reached
-  # purely over SSM, so it needs no inbound rule (mirrors the dev k3s node SG).
+  # Operators use SSM; workload ingress is restricted to VPC Lattice.
   NodeSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Gentrail appliance node, egress-only, no inbound (SSM-only access).
+      GroupDescription: Gentrail node with SSM operator access and private VPC Lattice workload ingress.
       VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 30001
+          ToPort: 30001
+          SourcePrefixListId: !Ref LatticePrefixListId
+          Description: Private workload API from VPC Lattice only
+        - IpProtocol: tcp
+          FromPort: 30318
+          ToPort: 30318
+          SourcePrefixListId: !Ref LatticePrefixListId
+          Description: Private OTLP from VPC Lattice only
       SecurityGroupEgress:
         - IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
@@ -335,6 +355,9 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-scanner'
+              - Effect: Allow
                 Action: bedrock-mantle:CreateInference
                 Resource: !Sub 'arn:${AWS::Partition}:bedrock-mantle:${AWS::Region}:${AWS::AccountId}:project/default'
                 Condition:
@@ -348,6 +371,105 @@ Resources:
               - Effect: Allow
                 Action: ['s3:GetObject', 's3:GetObjectVersion', 's3:PutObject', 's3:PutObjectRetention']
                 Resource: [!Sub '${EvidenceBucket.Arn}/*', !Sub '${TraceArchiveBucket.Arn}/*']
+  ScannerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-scanner'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !GetAtt DashboardIrsaRole.Arn
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/SecurityAudit'
+  WorkloadNetwork:
+    Type: AWS::VpcLattice::ServiceNetwork
+    Properties:
+      AuthType: NONE
+  WorkloadVpc:
+    Type: AWS::VpcLattice::ServiceNetworkVpcAssociation
+    Properties:
+      ServiceNetworkIdentifier: !Ref WorkloadNetwork
+      VpcIdentifier: !Ref Vpc
+  AgentVpc:
+    Type: AWS::VpcLattice::ServiceNetworkVpcAssociation
+    Condition: HasAgentVpc
+    Properties:
+      ServiceNetworkIdentifier: !Ref WorkloadNetwork
+      VpcIdentifier: !Ref AgentVpcId
+  WorkloadService:
+    Type: AWS::VpcLattice::Service
+    Properties:
+      AuthType: NONE
+  WorkloadAssociation:
+    Type: AWS::VpcLattice::ServiceNetworkServiceAssociation
+    Properties:
+      ServiceIdentifier: !Ref WorkloadService
+      ServiceNetworkIdentifier: !Ref WorkloadNetwork
+  WorkloadApiTargets:
+    Type: AWS::VpcLattice::TargetGroup
+    Properties:
+      Type: INSTANCE
+      Config:
+        VpcIdentifier: !Ref Vpc
+        Protocol: HTTP
+        Port: 30001
+        HealthCheck:
+          Enabled: true
+          Protocol: HTTP
+          Path: /auth/login
+          Matcher: {HttpCode: '200-399'}
+      Targets: [{Id: !Ref Node, Port: 30001}]
+  WorkloadIngestTargets:
+    Type: AWS::VpcLattice::TargetGroup
+    Properties:
+      Type: INSTANCE
+      Config:
+        VpcIdentifier: !Ref Vpc
+        Protocol: HTTP
+        Port: 30318
+        HealthCheck:
+          Enabled: true
+          Protocol: HTTP
+          Path: /healthz
+      Targets: [{Id: !Ref Node, Port: 30318}]
+  WorkloadListener:
+    Type: AWS::VpcLattice::Listener
+    Properties:
+      ServiceIdentifier: !Ref WorkloadService
+      Protocol: HTTPS
+      Port: 443
+      DefaultAction:
+        FixedResponse: {StatusCode: 404}
+  WorkloadApiRule:
+    Type: AWS::VpcLattice::Rule
+    Properties:
+      ServiceIdentifier: !Ref WorkloadService
+      ListenerIdentifier: !Ref WorkloadListener
+      Priority: 10
+      Match:
+        HttpMatch:
+          PathMatch:
+            Match: {Prefix: /api/v1/}
+      Action:
+        Forward:
+          TargetGroups: [{TargetGroupIdentifier: !Ref WorkloadApiTargets}]
+  WorkloadIngestRule:
+    Type: AWS::VpcLattice::Rule
+    Properties:
+      ServiceIdentifier: !Ref WorkloadService
+      ListenerIdentifier: !Ref WorkloadListener
+      Priority: 20
+      Match:
+        HttpMatch:
+          PathMatch:
+            Match: {Exact: /v1/traces}
+      Action:
+        Forward:
+          TargetGroups: [{TargetGroupIdentifier: !Ref WorkloadIngestTargets}]
   HeadlessIrsaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -533,6 +655,7 @@ Resources:
             export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
             CHART=/opt/gentrail/src/charts/gentrail
             DASHBOARD_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id DashboardIrsaRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
+            SCANNER_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id ScannerRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
             HEADLESS_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id HeadlessIrsaRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
             EXTRACTOR_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id PolicyEngineIrsaRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
             BOOTSTRAP_ROLE=$(aws cloudformation describe-stack-resource --stack-name "${AWS::StackName}" --logical-resource-id RdsBootstrapIrsaRole --region ${AWS::Region} --query StackResourceDetail.PhysicalResourceId --output text)
@@ -543,7 +666,7 @@ Resources:
             fi
             LICENSE_SET=""
             if [ -f /opt/gentrail/license.jwt ]; then LICENSE_SET="--set-file license.jwt=/opt/gentrail/license.jwt"; fi
-            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set irsa.dashboard=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$DASHBOARD_ROLE --set irsa.headless=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$HEADLESS_ROLE --set irsa.policyEngine=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$EXTRACTOR_ROLE --set irsa.rdsBootstrap=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$BOOTSTRAP_ROLE $LICENSE_SET $TUNNEL_SET --wait --wait-for-jobs --timeout 15m
+            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set dashboard.awsAccountId=${AWS::AccountId} --set dashboard.scannerRoleArn=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$SCANNER_ROLE --set privateWorkloadEndpoint.url=https://${WorkloadService.DnsEntry.DomainName} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set irsa.dashboard=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$DASHBOARD_ROLE --set irsa.headless=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$HEADLESS_ROLE --set irsa.policyEngine=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$EXTRACTOR_ROLE --set irsa.rdsBootstrap=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$BOOTSTRAP_ROLE $LICENSE_SET $TUNNEL_SET --wait --wait-for-jobs --timeout 15m
             INSTALL
             chmod 600 /opt/gentrail/fetch.sh /opt/gentrail/install.sh
 
@@ -560,7 +683,7 @@ Resources:
               READY=false
               for attempt in $(seq 1 120); do
                 READY=true
-                for resource in DashboardPiiKmsPolicy DashboardIrsaRole HeadlessIrsaRole PolicyEngineIrsaRole RdsBootstrapIrsaRole; do
+                for resource in ScannerRole DashboardPiiKmsPolicy DashboardIrsaRole HeadlessIrsaRole PolicyEngineIrsaRole RdsBootstrapIrsaRole; do
                   STATE=$(aws cloudformation describe-stack-resource --stack-name '${AWS::StackName}' --logical-resource-id "$resource" --region ${AWS::Region} --query StackResourceDetail.ResourceStatus --output text 2>/dev/null || true)
                   if [ "$STATE" != CREATE_COMPLETE ]; then READY=false; fi
                 done
@@ -601,6 +724,13 @@ Resources:
       Timeout: '1200'
       Count: 1
 Outputs:
+  WorkloadUrl:
+    Description: Private HTTPS SDK base URL. API key required; reachable from associated VPCs without gentrail connect.
+    Value: !Sub 'https://${WorkloadService.DnsEntry.DomainName}'
+  AgentVpcId:
+    Value: !If [HasAgentVpc, !Ref AgentVpcId, !Ref Vpc]
+  ScannerRoleArn:
+    Value: !GetAtt ScannerRole.Arn
   PiiTokenizationKeyArn:
     Value: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
   InstanceId:

@@ -7,11 +7,17 @@ metadata:
   labels:
 {{ include "gentrail.labels" (merge (dict "component" "dashboard") .) | indent 4 }}
 spec:
-  type: ClusterIP
+  type: {{ if .Values.privateWorkloadEndpoint.enabled }}NodePort{{ else }}ClusterIP{{ end }}
+  {{- if .Values.privateWorkloadEndpoint.enabled }}
+  externalTrafficPolicy: Local
+  {{- end }}
   ports:
     - port: 8001
       targetPort: http
       name: http
+      {{- if .Values.privateWorkloadEndpoint.enabled }}
+      nodePort: 30001
+      {{- end }}
   selector:
 {{ include "gentrail.selectorLabels" (merge (dict "component" "dashboard") .) | indent 4 }}
 

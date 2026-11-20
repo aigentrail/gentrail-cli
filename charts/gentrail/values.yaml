@@ -19,10 +19,10 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.14.0
+  tag: v0.15.0
   pullPolicy: IfNotPresent
   pullSecret: ""
-  references: {"audit-capture-worker":"public.ecr.aws/p6a2v1k1/audit-capture-worker@sha256:82d116ec8932e6c0e7820f8baaced292a12f92983ac43e731d0f40a72c331710","authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:de906fcdf3c4d8ff7c269e5a75b6b14fb743622923d885fbc4d60b7755819b31","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:33ec10df1f2b3c9e94894b5e669e7c6b74c19574a0dc89d0d73f85b0127389a4","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:515a0fa0ca00f07d84f2b13edff4c61eaa5407d3630be6897f796dee74620d65","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:48657cb4c6667187c0a58f9a6426e1751b1f09e1c09886d04e29b72bb674b142","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:6a262b13cfd669ebd60576deea5c2e8db958941416647e004c9382241733edf1","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:d72344ff2930a15d2049d7fa7a559a9b45fc71e961e8257ab452cc2173cbf60b"}
+  references: {"audit-capture-worker":"public.ecr.aws/p6a2v1k1/audit-capture-worker@sha256:82d116ec8932e6c0e7820f8baaced292a12f92983ac43e731d0f40a72c331710","authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:de906fcdf3c4d8ff7c269e5a75b6b14fb743622923d885fbc4d60b7755819b31","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:34dbe6ac1dc3e7b792f5558c7bd5fc0775b053686e7630ea2bea25ece34b1d3a","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:515a0fa0ca00f07d84f2b13edff4c61eaa5407d3630be6897f796dee74620d65","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:48657cb4c6667187c0a58f9a6426e1751b1f09e1c09886d04e29b72bb674b142","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:247381f7d1138eb335ebcc9ced2c9ad39b74c873cfef2e531518f2e4a17b98ee","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:09d0d59e335f5a83d7057a8b427560c4668a25cf18b80f7a491a94a52ee8932f"}
 ingress:
   # Set by the production bootstrap from the substrate outputs: CloudFormation
   # owns the load balancers, the chart only binds pods into their target groups.
@@ -135,6 +135,7 @@ dashboard:
   # has no callback URL, skips the forwarder deploy, and omits the cross-account
   # trust account from the CloudFormation template.
   awsAccountId: ""
+  scannerRoleArn: ""
   callbackUrl: ""
   ingestionEndpoint: ""
   # Absolute base for links in notification emails; empty falls back to relative.
@@ -290,3 +291,6 @@ metabase:
     resources:
       requests: {cpu: 50m, memory: 64Mi}
       limits: {cpu: 250m, memory: 256Mi}
+privateWorkloadEndpoint:
+  enabled: false
+  url: ""

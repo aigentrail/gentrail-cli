@@ -117,6 +117,10 @@ spec:
               value: {{ .Values.dashboard.auditLoop | quote }}
             - name: AIGENTRAIL_SELF_HOSTED
               value: {{ .Values.dashboard.selfHosted | quote }}
+            - name: GENTRAIL_WORKLOAD_URL
+              value: {{ .Values.privateWorkloadEndpoint.url | default "" | quote }}
+            - name: GENTRAIL_SCANNER_ROLE_ARN
+              value: {{ .Values.dashboard.scannerRoleArn | default "" | quote }}
             {{- if .Values.dashboard.awsAccountId }}
             - name: AIGENTRAIL_AWS_ACCOUNT_ID
               value: {{ .Values.dashboard.awsAccountId | quote }}

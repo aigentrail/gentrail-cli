@@ -1854,6 +1854,7 @@ Resources:
                   dashboardArn: ${DashboardTargetGroup}
                   otelArn: ${OtelTargetGroup}
               dashboard:
+                scannerRoleArn: ${GentrailReadOnlyRole.Arn}
                 piiKmsKeyArn: ${PiiTokenizationKeyArn}
                 piiKmsRegion: ${PiiTokenizationKeyRegion}
               s3:

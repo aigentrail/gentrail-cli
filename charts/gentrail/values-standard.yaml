@@ -1,4 +1,6 @@
 mode: k3s
+privateWorkloadEndpoint:
+  enabled: true
 local:
   enabled: false
 rds:
