@@ -19,7 +19,7 @@ image:
   # dev deploy overrides this to ghcr in infra/k3s-apps. publish-deploy.yml mirrors every
   # release tag from ghcr to this registry.
   registry: public.ecr.aws/p6a2v1k1
-  tag: v0.15.1
+  tag: v0.15.2
   pullPolicy: IfNotPresent
   pullSecret: ""
   references: {"audit-capture-worker":"public.ecr.aws/p6a2v1k1/audit-capture-worker@sha256:82d116ec8932e6c0e7820f8baaced292a12f92983ac43e731d0f40a72c331710","authproxy":"public.ecr.aws/p6a2v1k1/authproxy@sha256:de906fcdf3c4d8ff7c269e5a75b6b14fb743622923d885fbc4d60b7755819b31","dashboard":"public.ecr.aws/p6a2v1k1/dashboard@sha256:27212d07bf3da0fcc1b834cd8c28ad60db0a9638dc39af934af5f935c55b52f5","evaluator":"public.ecr.aws/p6a2v1k1/evaluator@sha256:515a0fa0ca00f07d84f2b13edff4c61eaa5407d3630be6897f796dee74620d65","exporter":"public.ecr.aws/p6a2v1k1/exporter@sha256:48657cb4c6667187c0a58f9a6426e1751b1f09e1c09886d04e29b72bb674b142","headless":"public.ecr.aws/p6a2v1k1/headless@sha256:247381f7d1138eb335ebcc9ced2c9ad39b74c873cfef2e531518f2e4a17b98ee","policy-engine":"public.ecr.aws/p6a2v1k1/policy-engine@sha256:e80772130c4113990ab7d8e43b96d05c140ae312d64816fe53ab918512920f68"}

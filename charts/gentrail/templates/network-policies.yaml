@@ -11,6 +11,8 @@ spec:
   policyTypes: [ Ingress, Egress ]
 ---
 # Allow dashboard to reach Postgres, policy-engine, NATS, DNS, and AWS APIs.
+# k3s translates the Kubernetes service's HTTPS port to API port 6443 before
+# evaluating egress policy. License uploads patch the mounted Secret there.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -25,6 +27,7 @@ spec:
     - to: []
       ports:
         - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 6443 }
         - { protocol: TCP, port: 5432 }
         - { protocol: TCP, port: 8100 }
         - { protocol: TCP, port: 8080 }
