@@ -1,7 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Gentrail standard installation: ARM64 k3s on one EC2 node, private managed PostgreSQL, retained S3 evidence with Object Lock, and SSM access. Single-AZ application and database; no EKS, NAT gateway or load balancer.
+  Gentrail standard installation: ARM64 k3s on one EC2 node, private managed PostgreSQL, retained S3 evidence with Object Lock, and SSM access. Single-AZ application and database; no EKS or NAT gateway. Optional public SDK HTTPS through API Gateway and an internal ALB.
 Parameters:
+  PublicSdkEndpoint:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Opt-in public HTTPS SDK endpoint; dashboard remains private. Adds API Gateway and internal ALB charges.
   AgentVpcId:
     Type: String
     Default: ""
@@ -77,6 +82,8 @@ Parameters:
     Default: 10.20.0.0/16
 Conditions:
   HasAgentVpc: !Not [!Equals [!Ref AgentVpcId, ""]]
+  HasPublicSdk:
+    Fn::Equals: [ {Ref: PublicSdkEndpoint}, "true" ]
   # >>> GENERATED pii-kms-conditions
   CreatePiiTokenizationKey:
     Fn::Equals:
@@ -173,13 +180,29 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
-  # Operators use SSM; workload ingress is restricted to VPC Lattice.
+  # Operators use SSM; workload ingress is restricted to Lattice or the internal SDK ALB.
   NodeSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Gentrail node with SSM operator access and private VPC Lattice workload ingress.
+      GroupDescription: Gentrail node with SSM operator access and restricted SDK ingress.
       VpcId: !Ref Vpc
       SecurityGroupIngress:
+        - !If
+          - HasPublicSdk
+          - IpProtocol: tcp
+            FromPort: 30001
+            ToPort: 30001
+            SourceSecurityGroupId: !Ref PublicSdkBalancerSecurityGroup
+            Description: SDK API through private load balancer only
+          - !Ref AWS::NoValue
+        - !If
+          - HasPublicSdk
+          - IpProtocol: tcp
+            FromPort: 30318
+            ToPort: 30318
+            SourceSecurityGroupId: !Ref PublicSdkBalancerSecurityGroup
+            Description: SDK traces through private load balancer only
+          - !Ref AWS::NoValue
         - IpProtocol: tcp
           FromPort: 30001
           ToPort: 30001
@@ -470,6 +493,314 @@ Resources:
       Action:
         Forward:
           TargetGroups: [{TargetGroupIdentifier: !Ref WorkloadIngestTargets}]
+  PublicSdkLinkSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: HasPublicSdk
+    Properties:
+      GroupDescription: Public SDK VPC link; private HTTP egress only
+      VpcId:
+        Ref: Vpc
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp:
+            Ref: VpcCidr
+  PublicSdkBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: HasPublicSdk
+    Properties:
+      GroupDescription: Private SDK load balancer reachable only by API Gateway VPC link
+      VpcId:
+        Ref: Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId:
+            Ref: PublicSdkLinkSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 30001
+          ToPort: 30001
+          CidrIp:
+            Ref: VpcCidr
+        - IpProtocol: tcp
+          FromPort: 30318
+          ToPort: 30318
+          CidrIp:
+            Ref: VpcCidr
+  PublicSdkBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Condition: HasPublicSdk
+    Properties:
+      Type: application
+      Scheme: internal
+      Subnets:
+        - Ref: DatabaseSubnetA
+        - Ref: DatabaseSubnetB
+      SecurityGroups:
+        - Ref: PublicSdkBalancerSecurityGroup
+      LoadBalancerAttributes:
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: "true"
+  PublicSdkApiTargets:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: HasPublicSdk
+    Properties:
+      VpcId:
+        Ref: Vpc
+      Protocol: HTTP
+      Port: 30001
+      TargetType: instance
+      Targets:
+        - Id:
+            Ref: Node
+          Port: 30001
+      HealthCheckPath: /auth/login
+      Matcher:
+        HttpCode: 200-399
+  PublicSdkTracesTargets:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: HasPublicSdk
+    Properties:
+      VpcId:
+        Ref: Vpc
+      Protocol: HTTP
+      Port: 30318
+      TargetType: instance
+      Targets:
+        - Id:
+            Ref: Node
+          Port: 30318
+      HealthCheckPath: /healthz
+      Matcher:
+        HttpCode: 200-399
+  PublicSdkListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasPublicSdk
+    Properties:
+      LoadBalancerArn:
+        Ref: PublicSdkBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: "404"
+            ContentType: text/plain
+            MessageBody: Not found
+  PublicSdkApiRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: HasPublicSdk
+    Properties:
+      ListenerArn:
+        Ref: PublicSdkListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/v1/*
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: PublicSdkApiTargets
+  PublicSdkTracesRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: HasPublicSdk
+    Properties:
+      ListenerArn:
+        Ref: PublicSdkListener
+      Priority: 20
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /v1/traces
+        - Field: http-request-method
+          HttpRequestMethodConfig:
+            Values:
+              - POST
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: PublicSdkTracesTargets
+  PublicSdkVpcLink:
+    Type: AWS::ApiGatewayV2::VpcLink
+    Condition: HasPublicSdk
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-sdk
+      SubnetIds:
+        - Ref: DatabaseSubnetA
+        - Ref: DatabaseSubnetB
+      SecurityGroupIds:
+        - Ref: PublicSdkLinkSecurityGroup
+  PublicSdkApi:
+    Type: AWS::ApiGatewayV2::Api
+    Condition: HasPublicSdk
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-sdk
+      ProtocolType: HTTP
+      DisableExecuteApiEndpoint: false
+  PublicSdkIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      IntegrationType: HTTP_PROXY
+      IntegrationMethod: ANY
+      ConnectionType: VPC_LINK
+      ConnectionId:
+        Ref: PublicSdkVpcLink
+      IntegrationUri:
+        Ref: PublicSdkListener
+      PayloadFormatVersion: "1.0"
+      RequestParameters:
+        overwrite:path: $request.path
+      TimeoutInMillis: 30000
+  PublicSdkTracesRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: POST /v1/traces
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkDecideRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: POST /api/v1/decide
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkAdmissionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: POST /api/v1/decisions/{id}/admission
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkConsumeRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: POST /api/v1/decisions/{id}/admission/consume
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkReleaseRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: DELETE /api/v1/decisions/{id}/admission
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkDecisionApprovalRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: GET /api/v1/decisions/{id}/approval
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkToolsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: GET /api/v1/decision-tools
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkApprovalRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: GET /api/v1/approvals/{id}
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkAccessRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: GET /api/v1/access
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkObservationsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      RouteKey: GET /api/v1/decisions/{id}/observations
+      AuthorizationType: NONE
+      Target:
+        Fn::Join:
+          - /
+          - - integrations
+            - Ref: PublicSdkIntegration
+  PublicSdkStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Condition: HasPublicSdk
+    Properties:
+      ApiId:
+        Ref: PublicSdkApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
   HeadlessIrsaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -666,7 +997,7 @@ Resources:
             fi
             LICENSE_SET=""
             if [ -f /opt/gentrail/license.jwt ]; then LICENSE_SET="--set-file license.jwt=/opt/gentrail/license.jwt"; fi
-            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set dashboard.awsAccountId=${AWS::AccountId} --set dashboard.scannerRoleArn=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$SCANNER_ROLE --set privateWorkloadEndpoint.url=https://${WorkloadService.DnsEntry.DomainName} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set irsa.dashboard=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$DASHBOARD_ROLE --set irsa.headless=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$HEADLESS_ROLE --set irsa.policyEngine=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$EXTRACTOR_ROLE --set irsa.rdsBootstrap=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$BOOTSTRAP_ROLE $LICENSE_SET $TUNNEL_SET --wait --wait-for-jobs --timeout 15m
+            helm upgrade --install gentrail "$CHART" --namespace gentrail -f "$CHART/values-standard.yaml" --set createNamespace=false --set aws.region=${AWS::Region} --set dashboard.awsAccountId=${AWS::AccountId} --set dashboard.scannerRoleArn=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$SCANNER_ROLE --set privateWorkloadEndpoint.url=${SdkEndpointUrl} --set rds.endpoint=${RdsInstance.Endpoint.Address}:${RdsInstance.Endpoint.Port} --set rds.secretArn=${RdsInstance.MasterUserSecret.SecretArn} --set s3.evidenceBucket=${EvidenceBucket} --set s3.traceArchiveBucket=${TraceArchiveBucket} --set dashboard.piiKmsKeyArn=${PiiTokenizationKeyArn} --set dashboard.piiKmsRegion=${PiiTokenizationKeyRegion} --set irsa.dashboard=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$DASHBOARD_ROLE --set irsa.headless=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$HEADLESS_ROLE --set irsa.policyEngine=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$EXTRACTOR_ROLE --set irsa.rdsBootstrap=arn:${AWS::Partition}:iam::${AWS::AccountId}:role/$BOOTSTRAP_ROLE $LICENSE_SET $TUNNEL_SET --wait --wait-for-jobs --timeout 15m
             INSTALL
             chmod 600 /opt/gentrail/fetch.sh /opt/gentrail/install.sh
 
@@ -699,6 +1030,7 @@ Resources:
             echo "gentrail appliance bootstrap complete (SelfInstall=${SelfInstall})"
           - ApplicationReadySignal: !If [SelfInstallEnabled, !Ref ApplicationReadyHandle, ""]
             PiiTokenizationKeyArn: !If [CreatePiiTokenizationKey, !GetAtt PiiTokenizationKey.Arn, !Ref ExistingPiiTokenizationKeyArn]
+            SdkEndpointUrl: !If [HasPublicSdk, !GetAtt PublicSdkApi.ApiEndpoint, !Sub 'https://${WorkloadService.DnsEntry.DomainName}']
             PiiTokenizationKeyRegion: !If [CreatePiiTokenizationKey, !Ref 'AWS::Region', !Select [3, !Split [':', !Ref ExistingPiiTokenizationKeyArn]]]
             TunnelWrite: !If
               - HasTunnel
@@ -725,7 +1057,10 @@ Resources:
       Count: 1
 Outputs:
   WorkloadUrl:
-    Description: Private HTTPS SDK base URL. API key required; reachable from associated VPCs without gentrail connect.
+    Description: Selected HTTPS SDK base URL. API key required. Public when enabled; otherwise reachable from associated VPCs only.
+    Value: !If [HasPublicSdk, !GetAtt PublicSdkApi.ApiEndpoint, !Sub 'https://${WorkloadService.DnsEntry.DomainName}']
+  PrivateWorkloadUrl:
+    Description: Private HTTPS SDK endpoint for associated VPCs, also available when public SDK access is enabled.
     Value: !Sub 'https://${WorkloadService.DnsEntry.DomainName}'
   AgentVpcId:
     Value: !If [HasAgentVpc, !Ref AgentVpcId, !Ref Vpc]
